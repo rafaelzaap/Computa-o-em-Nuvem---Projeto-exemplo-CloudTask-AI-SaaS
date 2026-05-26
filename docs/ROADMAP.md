@@ -8,11 +8,19 @@ Cada aula tem uma branch `aula-XX-final` no GitHub contendo o estado acumulado.
 ## Convenções de versionamento
 
 - **Branches:**
-  - `main` — apenas guia, README e documentação geral.
-  - `week-0X-tema` — estado consolidado de cada semana.
+  - `main` — apenas guia, README e documentação geral. Só é atualizada ao final da disciplina (ou quando o professor decidir).
+  - `semana-0X-tema` — branch principal de cada semana; acumula todo o código produzido naquela semana. Não é mergeada em `main`. A cada nova semana, a branch correspondente parte do estado da semana anterior.
   - `aula-XX-final` — estado pós-aula (o que será publicado e usado pelos alunos).
   - *(opcional)* `aula-XX-base` — estado pré-aula (ponto de partida).
   - *(opcional)* `aula-XX-desafio` — versão com lacunas para os alunos completarem.
+
+  Branches de semana publicadas:
+  - `semana-01-fastapi-docker`
+  - `semana-02-rds-vpc-seguranca`
+  - `semana-03-s3-kubernetes`
+  - `semana-04-eks-aws`
+  - `semana-05-custos-nosql-logs`
+  - `semana-06-cdk-final`
 - **Tags:**
   - `aula-01-start`, `aula-02-docker`, `aula-03-postgres-crud`, `aula-04-security-env`,
     `aula-05-s3-uploads`, `aula-06-kubernetes-local`, `aula-07-ecr`, `aula-08-eks`,
