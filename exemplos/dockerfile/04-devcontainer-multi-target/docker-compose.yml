@@ -1,0 +1,41 @@
+# =============================================================================
+# docker-compose.yml — BASE
+# -----------------------------------------------------------------------------
+# Definições comuns a todos os ambientes (dev / test / prod local).
+# Nunca usado sozinho — sempre combinado com um override:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml  up
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm api
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+# =============================================================================
+
+services:
+
+  api:
+    # build.context aponta para a raiz do projeto (3 níveis acima).
+    # build.target é definido pelo override (dev / test / prod).
+    build:
+      context: ../../..
+      dockerfile: exemplos/dockerfile/04-devcontainer-multi-target/Dockerfile
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cloudtask}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cloudtask}
+      POSTGRES_DB: ${POSTGRES_DB:-cloudtask}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cloudtask}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

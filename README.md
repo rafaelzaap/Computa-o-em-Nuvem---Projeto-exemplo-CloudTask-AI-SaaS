@@ -80,6 +80,9 @@ Detalhes completos: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 Lista fixa das **12 tarefas** (espelha as Issues do GitHub, para consulta offline):
 [`docs/TAREFAS.md`](docs/TAREFAS.md).
 
+Exemplos didáticos de referência (Dockerfile, futuro: CDK, K8s, ...):
+[`exemplos/`](exemplos/).
+
 ## Como o aluno deve usar este repositório
 
 Guia rápido (passo a passo, comandos e pré-requisitos): [`docs/HOW_TO_USE.md`](docs/HOW_TO_USE.md).

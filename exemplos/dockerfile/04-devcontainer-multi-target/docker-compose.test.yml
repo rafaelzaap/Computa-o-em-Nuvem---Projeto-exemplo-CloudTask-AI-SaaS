@@ -1,0 +1,38 @@
+# =============================================================================
+# docker-compose.test.yml — OVERRIDE para testes (CI / local)
+# -----------------------------------------------------------------------------
+# Casado com o GitHub Actions (ver .github/workflows/ci.yml).
+# Características:
+#   - Imagem construída no target `test` (com pytest, httpx, coverage).
+#   - Código + tests/ JÁ EMBUTIDOS na imagem (sem volume) → reprodutibilidade.
+#   - Banco PostgreSQL efêmero (sem volume) → estado limpo a cada execução.
+#   - Comando padrão: pytest (vem do Dockerfile target `test`).
+#
+# Uso local:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm api
+#
+# Uso no CI:
+#   ver .github/workflows/ci.yml
+# =============================================================================
+
+services:
+
+  api:
+    build:
+      target: test
+    image: cloudtask-api:test
+    container_name: cloudtask-api-test
+    environment:
+      APP_ENV: test
+      LOG_LEVEL: WARNING
+      DATABASE_URL: postgresql+psycopg2://cloudtask:cloudtask@db:5432/cloudtask_test
+    # Sem volumes de código: o que está na imagem É o que é testado.
+    # Sem restart: rodou, terminou, sai.
+    restart: "no"
+
+  db:
+    container_name: cloudtask-db-test
+    environment:
+      POSTGRES_DB: cloudtask_test
+    # Sem volume nomeado → banco totalmente efêmero.
+    volumes: []

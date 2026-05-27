@@ -1,0 +1,58 @@
+# =============================================================================
+# docker-compose.yml — CloudTask AI SaaS (didático)
+# -----------------------------------------------------------------------------
+# Sobe a aplicação FastAPI + um PostgreSQL local em containers.
+# Use este arquivo a partir da Aula 3 (CRUD com PostgreSQL).
+#
+# Comandos básicos:
+#   docker compose up --build       # constrói imagens e sobe os serviços
+#   docker compose up -d            # roda em background
+#   docker compose logs -f api      # acompanha logs da API
+#   docker compose exec db psql -U $POSTGRES_USER $POSTGRES_DB   # entra no DB
+#   docker compose down             # para e remove containers (preserva o volume)
+#   docker compose down -v          # remove TAMBÉM o volume (zera o banco!)
+# =============================================================================
+
+services:
+
+  # ----- API FastAPI ---------------------------------------------------------
+  api:
+    build:
+      context: ../../..        # raiz do projeto CloudTask (onde está app/)
+      dockerfile: exemplos/dockerfile/03-cloudtask/Dockerfile
+    image: cloudtask-api:dev
+    container_name: cloudtask-api
+    env_file:
+      - .env                   # variáveis de ambiente (copie do .env.example)
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy   # só sobe a API depois que o DB estiver pronto
+    # Monta o código para hot-reload em desenvolvimento. Em produção, remova.
+    volumes:
+      - ../../../app:/app/app:ro
+    restart: unless-stopped
+
+  # ----- Banco PostgreSQL ----------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: cloudtask-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cloudtask}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cloudtask}
+      POSTGRES_DB: ${POSTGRES_DB:-cloudtask}
+    ports:
+      - "5432:5432"            # exponha apenas em dev; em produção, deixe interno
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cloudtask}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+# ----- volumes nomeados (persistência do banco) -----------------------------
+volumes:
+  pgdata:

@@ -1,0 +1,81 @@
+// =============================================================================
+// devcontainer.json — VS Code Dev Containers
+// -----------------------------------------------------------------------------
+// Sobe a aplicação (target `dev`) + PostgreSQL e anexa o VS Code ao container
+// `api`. O aluno edita, depura e roda testes "como se" estivesse num Linux
+// limpo, sem precisar instalar Python/Postgres na máquina física.
+//
+// Como usar:
+//   1. Instale a extensão "Dev Containers" (ms-vscode-remote.remote-containers).
+//   2. Abra a pasta `exemplos/dockerfile/04-devcontainer-multi-target/`.
+//   3. F1 → "Dev Containers: Reopen in Container".
+// =============================================================================
+{
+  "name": "CloudTask AI SaaS — dev",
+
+  // Reusa o mesmo compose base + override dev usados fora do VS Code.
+  "dockerComposeFile": [
+    "../docker-compose.yml",
+    "../docker-compose.dev.yml"
+  ],
+
+  // Serviço ao qual o VS Code se conecta. Os outros (db) sobem juntos.
+  "service": "api",
+
+  // Pasta aberta dentro do container.
+  "workspaceFolder": "/app",
+
+  // Mantém o container vivo após o VS Code fechar (acelera próximas aberturas).
+  "shutdownAction": "stopCompose",
+
+  // Usuário não-root criado no Dockerfile.
+  "remoteUser": "appuser",
+
+  // Features são "add-ons" oficiais que se instalam dentro do container.
+  // git e gh são úteis para o aluno commitar/abrir PRs sem sair do devcontainer.
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  // Extensões e settings do VS Code aplicados automaticamente ao container.
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.debugpy",
+        "charliermarsh.ruff",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml",
+        "ms-azuretools.vscode-docker",
+        "github.vscode-github-actions"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/home/appuser/.local/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests"],
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.fixAll.ruff": "explicit",
+          "source.organizeImports.ruff": "explicit"
+        },
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        }
+      }
+    }
+  },
+
+  // Roda uma vez, logo após o container subir pela primeira vez.
+  // Útil para validar instalação e configurar pre-commit hooks.
+  "postCreateCommand": "python -V && pip list && pre-commit install || true",
+
+  // Encaminhamento automático de portas para o host.
+  "forwardPorts": [8000, 5678, 5432],
+  "portsAttributes": {
+    "8000": { "label": "FastAPI",  "onAutoForward": "notify" },
+    "5678": { "label": "debugpy",  "onAutoForward": "silent" },
+    "5432": { "label": "PostgreSQL", "onAutoForward": "silent" }
+  }
+}

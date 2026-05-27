@@ -1,0 +1,35 @@
+# =============================================================================
+# docker-compose.prod.yml — OVERRIDE para produção LOCAL (smoke test)
+# -----------------------------------------------------------------------------
+# Em produção REAL o deploy é via EKS (ver ./k8s/) — esta config é só para
+# verificar localmente que a imagem `prod` sobe limpa, sem ferramentas de dev.
+#
+# Características:
+#   - Imagem construída no target `prod`.
+#   - Código JÁ EMBUTIDO (sem volume).
+#   - Porta exposta para teste, mas o banco fica INTERNO (sem 5432:5432).
+#   - restart: always (comportamento de produção).
+#
+# Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+# =============================================================================
+
+services:
+
+  api:
+    build:
+      target: prod
+    image: cloudtask-api:prod
+    container_name: cloudtask-api-prod
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      APP_ENV: production
+      LOG_LEVEL: INFO
+    restart: always
+    # Sem volumes de código: a imagem é imutável.
+
+  db:
+    container_name: cloudtask-db-prod
+    # SEM mapeamento de porta — banco fica acessível apenas dentro da rede do compose.
+    restart: always

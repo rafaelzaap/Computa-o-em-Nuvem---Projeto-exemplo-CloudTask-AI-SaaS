@@ -1,0 +1,9 @@
+# Ferramentas de desenvolvimento (target `dev`, devcontainer).
+# NÃO entram em test nem em prod.
+debugpy>=1.8,<2.0          # debugger remoto (VS Code attach)
+ipdb>=0.13,<1.0            # pdb melhorado
+ruff>=0.5,<1.0             # linter + formatter rápido
+mypy>=1.10,<2.0            # type checker
+pre-commit>=3.7,<4.0       # hooks de git
+rich>=13.0,<14.0           # output bonito em prints/logs
+watchfiles>=0.21,<1.0      # hot-reload mais rápido p/ uvicorn

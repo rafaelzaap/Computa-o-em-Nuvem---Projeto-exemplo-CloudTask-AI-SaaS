@@ -1,0 +1,18 @@
+# Service tipo LoadBalancer — no EKS isto provisiona automaticamente um
+# ELB / NLB público. Para uso interno, troque por ClusterIP + Ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudtask-api
+  namespace: cloudtask
+  labels:
+    app: cloudtask-api
+spec:
+  type: LoadBalancer
+  selector:
+    app: cloudtask-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP

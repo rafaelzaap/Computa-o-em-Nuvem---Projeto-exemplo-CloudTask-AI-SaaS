@@ -1,0 +1,45 @@
+# Mesmo conjunto do exemplo 03, adaptado.
+.git
+.gitignore
+.gitattributes
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+.env
+.env.*
+!.env.example
+
+.vscode
+.idea
+.claude
+.DS_Store
+Thumbs.db
+
+dist
+build
+*.egg-info
+.pytest_cache
+.mypy_cache
+.coverage
+htmlcov
+
+local_uploads/
+local_events/
+
+# Pastas que não devem entrar em nenhuma imagem final.
+infra/
+docs/
+exemplos/
+README.md
+LICENSE
+.readme_docs/
+
+# Cuidado: tests/ é necessário no target `test`. Esse .dockerignore aplica
+# ao build inteiro, mas o COPY do estágio `test` é seletivo (só app/ e tests/).
+# Se quiser excluir tests/ do build de prod sem alterar o Dockerfile, mantenha
+# o estágio prod copiando apenas `app/` (como já está).

@@ -1,0 +1,123 @@
+# =============================================================================
+# CI/CD do exemplo 04 — GitHub Actions
+# -----------------------------------------------------------------------------
+# IMPORTANTE: este arquivo está dentro de `exemplos/...` portanto NÃO é
+# executado pelo GitHub (que só lê `.github/workflows/*.yml` na raiz do repo).
+# É apenas didático. Para ativar de verdade num projeto, copie o conteúdo
+# para `.github/workflows/ci.yml` na raiz.
+#
+# O que ele faz:
+#   1. Em pushes/PRs, constrói a imagem no target `test` e roda pytest.
+#   2. Se o push for em `main`, também constrói o target `prod` e empurra
+#      para o Amazon ECR (precisa dos secrets AWS_*).
+# =============================================================================
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: cloudtask-api
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # Job 1: TESTES (sempre roda)
+  # ---------------------------------------------------------------------------
+  tests:
+    name: Testes (target=test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Constrói só o target `test` e mantém o resultado em cache para o job de
+      # build-and-push reaproveitar as camadas anteriores.
+      - name: Construir imagem (target=test)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: test
+          load: true
+          tags: cloudtask-api:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Subir banco PostgreSQL temporário
+        run: |
+          docker network create cloudtask-ci || true
+          docker run -d --rm \
+            --name cloudtask-db-ci \
+            --network cloudtask-ci \
+            -e POSTGRES_USER=cloudtask \
+            -e POSTGRES_PASSWORD=cloudtask \
+            -e POSTGRES_DB=cloudtask_test \
+            postgres:16-alpine
+          # Espera o banco ficar pronto.
+          for i in $(seq 1 30); do
+            docker exec cloudtask-db-ci pg_isready -U cloudtask && break
+            sleep 1
+          done
+
+      - name: Rodar pytest na imagem `test`
+        run: |
+          docker run --rm \
+            --network cloudtask-ci \
+            -e DATABASE_URL=postgresql+psycopg2://cloudtask:cloudtask@cloudtask-db-ci:5432/cloudtask_test \
+            cloudtask-api:test \
+            pytest -q --cov=app --cov-report=term-missing
+
+      - name: Parar banco
+        if: always()
+        run: docker stop cloudtask-db-ci || true
+
+  # ---------------------------------------------------------------------------
+  # Job 2: BUILD + PUSH (só na branch main, após testes passarem)
+  # ---------------------------------------------------------------------------
+  build-and-push:
+    name: Build & Push prod → ECR
+    needs: tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # para OIDC com a AWS (alternativa a secrets fixos)
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Use OIDC + role assumida; cai para credenciais estáticas se preferir.
+      - name: Login na AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login no ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push imagem prod
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: prod
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

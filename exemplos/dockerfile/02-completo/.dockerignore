@@ -1,0 +1,34 @@
+# Versionamento e ambiente local
+.git
+.gitignore
+.gitattributes
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Configuração local
+.env
+.env.*
+!.env.example
+
+# IDEs / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Artefatos de build/test
+dist
+build
+*.egg-info
+.pytest_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# Docker / Compose
+docker-compose.override.yml

@@ -1,0 +1,43 @@
+# =============================================================================
+# docker-compose.dev.yml — OVERRIDE para desenvolvimento
+# -----------------------------------------------------------------------------
+# Casado com o devcontainer do VS Code. Características:
+#   - Imagem construída no target `dev` (com debugpy, ipdb, ruff...).
+#   - Código montado por volume → hot-reload e edição ao vivo.
+#   - Porta extra 5678 para `Attach` do debugger Python do VS Code.
+#   - Comando padrão: uvicorn --reload (vem do Dockerfile target `dev`).
+#
+# Uso direto (sem devcontainer):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# =============================================================================
+
+services:
+
+  api:
+    build:
+      target: dev
+    image: cloudtask-api:dev
+    container_name: cloudtask-api-dev
+    ports:
+      - "${APP_PORT:-8000}:8000"
+      - "5678:5678"             # debugpy
+    volumes:
+      # Código montado RW para hot-reload e edição no VS Code.
+      - ../../../app:/app/app
+      - ../../../tests:/app/tests
+      # Permite ao devcontainer instalar pacotes adicionais sem recriar imagem.
+      - dev-pip-cache:/home/appuser/.cache/pip
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: DEBUG
+    # Mantém o container vivo mesmo se o uvicorn cair — útil no devcontainer.
+    # Sobrescreva com `docker compose run` se quiser comportamento estrito.
+    restart: unless-stopped
+
+  db:
+    container_name: cloudtask-db-dev
+    ports:
+      - "5432:5432"             # só expor em DEV; em prod fica interno
+
+volumes:
+  dev-pip-cache:
