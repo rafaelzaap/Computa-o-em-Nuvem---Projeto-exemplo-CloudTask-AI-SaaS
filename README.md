@@ -117,6 +117,7 @@ docker compose down -v                  # para tudo + remove volumes nomeados
 - Lista completa de tarefas: [`docs/TAREFAS.md`](docs/TAREFAS.md)
 - Guia geral: [`docs/HOW_TO_USE.md`](docs/HOW_TO_USE.md)
 - Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- **Configuração do zero (terminal, Docker, AWS CLI, Learner Lab):** [`docs/aws-academy-setup.md`](docs/aws-academy-setup.md)
 - Exemplos didáticos: [`exemplos/dockerfile/`](exemplos/dockerfile/)
 
 ## Licença
