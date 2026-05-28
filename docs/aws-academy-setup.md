@@ -199,8 +199,13 @@ kind --version
 
 **Windows (PowerShell):**
 ```powershell
-winget install -e --id Weaveworks.eksctl
+winget install -e --id eksctl.eksctl
 ```
+> 💡 O `eksctl` saiu da Weaveworks e hoje é mantido pela comunidade `eksctl-io`.
+> Por isso o ID do winget é **`eksctl.eksctl`** (o antigo `Weaveworks.eksctl`
+> não existe mais). Se o `winget` disser "Nenhum pacote encontrou os critérios",
+> confira o ID com `winget search eksctl`.
+
 **macOS:** `brew install eksctl`
 **Linux:**
 ```bash
