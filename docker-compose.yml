@@ -1,0 +1,54 @@
+# =============================================================================
+# docker-compose.yml — CloudTask AI SaaS (Aula 2)
+# -----------------------------------------------------------------------------
+# Sobe a API FastAPI em container, usando o target `dev` do Dockerfile.
+# Esta configuração é o "estado padrão" do desenvolvimento, consumido tanto
+# por `docker compose up` quanto pelo devcontainer do VS Code.
+#
+# Comandos básicos:
+#   docker compose up --build         # constrói e sobe
+#   docker compose up -d              # em background
+#   docker compose logs -f api        # acompanha os logs
+#   docker compose exec api sh        # shell dentro do container
+#   docker compose down               # para e remove containers
+#
+# Em produção (simulação local):
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+#
+# Evolução nas próximas aulas:
+#   * Aula 3 (PostgreSQL): adicionaremos o serviço `db` (Postgres 16,
+#     compatível com Amazon RDS for PostgreSQL) e `depends_on` no `api`.
+#   * Aula 4 (.env): substituiremos os defaults inline por env_file: .env.
+# =============================================================================
+
+services:
+
+  # ----- API FastAPI -------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev                         # imagem com debugpy, ruff, watchfiles
+    image: cloudtask-api:dev
+    container_name: cloudtask-api
+    ports:
+      - "${APP_PORT:-8000}:8000"          # API
+      - "5678:5678"                       # debugpy (attach do VS Code)
+    volumes:
+      # Mount cached: editar no host reflete dentro do container (hot-reload
+      # do uvicorn ativa). Sintaxe `cached` melhora performance no macOS.
+      - .:/app:cached
+      # Cache do pip do usuário appuser. Sobrevive a `down`.
+      - api-pip-cache:/home/appuser/.cache/pip
+    environment:
+      APP_ENV: development
+      APP_PORT: "8000"
+      LOG_LEVEL: DEBUG
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    # Mantém container vivo mesmo após Ctrl+C do uvicorn — facilita o uso
+    # como devcontainer, onde o VS Code dispara o uvicorn manualmente.
+    restart: unless-stopped
+
+volumes:
+  api-pip-cache:

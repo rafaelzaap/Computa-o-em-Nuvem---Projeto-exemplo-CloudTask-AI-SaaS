@@ -213,3 +213,6 @@ logs/
 .cursor/
 .aider*
 
+# Lock file de features do VS Code Dev Containers (gerado automaticamente)
+.devcontainer/devcontainer-lock.json
+

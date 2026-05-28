@@ -5,9 +5,9 @@
 
 <!-- Título e breve descrição do repositório -->
 <div align="center">
-  <h1>CloudTask AI SaaS — Aula 1</h1>
-  <p><b>Branch <code>semana-01-fastapi-docker</code> — estado pós Aula 1.</b></p>
-  <p>API FastAPI mínima (<code>/health</code> e <code>/</code>) + Dockerfile multi-target + devcontainer do VS Code.</p>
+  <h1>CloudTask AI SaaS — Aula 2</h1>
+  <p><b>Branch <code>semana-01-fastapi-docker</code> — estado pós Aula 2.</b></p>
+  <p>API FastAPI + Dockerfile multi-target + <b>Docker Compose</b> + devcontainer (agora consumindo o compose).</p>
 </div>
 
 <p align="center">
@@ -20,74 +20,67 @@
 
 ## O que foi entregue nesta aula
 
-- Estrutura inicial do pacote `app/`:
-  - `app/main.py` — instância do FastAPI.
-  - `app/api/routes_health.py` — endpoint `GET /health`.
-- Endpoints:
-  - `GET /` — metadados (nome, versão, link para `/docs`).
-  - `GET /health` — `{"status": "ok"}`.
-  - `GET /docs` — Swagger gerado pela FastAPI.
-- `requirements.txt` (produção) e `requirements-dev.txt` (debug, lint, hot-reload).
-- `Dockerfile` **multi-target** com estágios `dev` e `prod` (a base para todas as próximas aulas).
-- `.dockerignore` evitando levar `.git`, `.venv`, segredos e pastas auxiliares para a imagem.
-- `.devcontainer/devcontainer.json` que abre a aplicação no VS Code dentro do container `dev` — desenvolvimento **cloud-native desde o primeiro dia**.
-- `.vscode/launch.json` com configurações de debug (launch direto + attach na porta 5678).
+- `docker-compose.yml` com o serviço `api` (target `dev` do Dockerfile, hot-reload, volume `.:/app`).
+- `docker-compose.prod.yml` (override) simulando a imagem `prod` localmente.
+- `.devcontainer/devcontainer.json` **migrado** de `build` direto para `dockerComposeFile` — o compose é agora a única fonte de verdade do ambiente.
+- README atualizado.
+
+> **Por que migrar o devcontainer para o compose já na Aula 2?**
+> Na Aula 3 vamos adicionar o serviço `db` (PostgreSQL 16, compatível com Amazon RDS for PostgreSQL) ao mesmo compose. Com a migração feita agora, **nada muda** no `devcontainer.json` na Aula 3 — basta editar o compose, e o aluno ganha o banco automaticamente ao reabrir o devcontainer.
+
+## O que continua igual (Aula 1)
+
+- `app/main.py` + `app/api/routes_health.py` (endpoints `GET /` e `GET /health`).
+- `app/schemas.py` (modelos Pydantic com exemplos para o Swagger).
+- `Dockerfile` multi-target (`dev` / `prod`).
+- `.dockerignore`, `requirements.txt`, `requirements-dev.txt`.
+- `pyproject.toml` (ruff/pytest/mypy).
+- `.vscode/launch.json` para debug.
 
 ## Pré-requisitos
 
 | Ferramenta              | Versão mínima | Para quê                                         |
 | ----------------------- | ------------- | ------------------------------------------------ |
 | Git                     | 2.40          | Clonar e trocar de branches.                     |
-| Docker Desktop          | 4.30          | Construir e rodar a imagem.                      |
+| Docker Desktop          | 4.30          | Construir e rodar a imagem (compose v2 incluso). |
 | VS Code                 | 1.90          | Editor de código.                                |
 | Extensão Dev Containers | 0.380         | Abrir o projeto dentro do container.             |
-| Python *(opcional)*     | 3.11          | Rodar fora do container, se preferir.            |
 
-> No Windows, use **WSL2** com integração ao Docker Desktop. No macOS/Linux funciona nativo.
-
-## Como rodar — três caminhos
+## Como rodar
 
 ### 1) Devcontainer no VS Code (recomendado)
 
 ```text
-1. Abra a pasta deste repositório no VS Code.
+1. Abra a pasta do repositório no VS Code.
 2. F1 → "Dev Containers: Reopen in Container".
-3. Aguarde o build (só na primeira vez).
+3. Aguarde o compose subir o serviço `api` (1ª vez ~1 min).
 4. No terminal integrado:  uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 5. Abra http://localhost:8000/docs no navegador do host.
 ```
 
-Para depurar, use `Run and Debug` (`Ctrl+Shift+D`) → escolha **"FastAPI (uvicorn debug)"** e coloque breakpoints em `app/*.py`.
-
-### 2) Docker puro (sem VS Code)
+### 2) Docker Compose direto (sem VS Code)
 
 ```bash
-# Build da imagem de desenvolvimento
-docker build --target dev -t cloudtask-api:dev .
+# dev (target dev, hot-reload, código montado)
+docker compose up --build
+# em background: docker compose up -d --build
 
-# Subir a API com hot-reload e código montado por volume
-docker run --rm -it -p 8000:8000 -v "${PWD}:/app" cloudtask-api:dev
+# acompanhar logs
+docker compose logs -f api
 
-# Testar
-curl http://localhost:8000/health
-# resposta esperada: {"status":"ok"}
+# parar
+docker compose down
+
+# simular produção
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
 ```
 
-A imagem de produção (sem ferramentas de dev) é construída com:
+### 3) Docker puro (também funciona)
 
 ```bash
+docker build --target dev  -t cloudtask-api:dev  .
 docker build --target prod -t cloudtask-api:prod .
-```
-
-### 3) Python local (sem Docker)
-
-```bash
-python -m venv .venv
-# Windows (PowerShell):  .venv\Scripts\Activate.ps1
-# macOS / Linux:         source .venv/bin/activate
-
-pip install -r requirements-dev.txt
-uvicorn app.main:app --reload
+docker run --rm -p 8000:8000 cloudtask-api:prod
 ```
 
 ## Endpoints
@@ -96,23 +89,35 @@ uvicorn app.main:app --reload
 | ------ | ----------------- | -------------------------------------------- |
 | GET    | `/`               | Metadados da aplicação.                      |
 | GET    | `/health`         | Liveness probe (`{"status": "ok"}`).         |
-| GET    | `/docs`           | Swagger UI interativo (gerado pela FastAPI). |
+| GET    | `/docs`           | Swagger UI interativo (Markdown rico).       |
+| GET    | `/redoc`          | ReDoc.                                       |
 | GET    | `/openapi.json`   | Especificação OpenAPI.                       |
+
+## Comandos úteis de Compose
+
+```bash
+docker compose ps                       # lista serviços rodando
+docker compose exec api sh              # shell no container da API
+docker compose logs -f api              # tail dos logs
+docker compose build --no-cache api     # rebuild forçado
+docker compose down -v                  # para tudo + remove volumes nomeados
+```
 
 ## O que vem na próxima aula
 
-- **Aula 2 (mesma branch `semana-01-fastapi-docker`):** Docker Compose para a API. Devcontainer continua usando o mesmo Dockerfile, sem mudanças.
-- **Semana 2 (branch `semana-02-rds-vpc-seguranca`):**
-  - Aula 3: PostgreSQL 16 (**compatível com Amazon RDS for PostgreSQL**) via Compose, CRUD de tarefas.
-  - O devcontainer migrará de `"build"` para `"dockerComposeFile"` apontando para o `docker-compose.yml` com serviço `db`.
+- **Aula 3 (branch `semana-02-rds-vpc-seguranca`):**
+  - Adicionar `postgres:16-alpine` como serviço `db` ao `docker-compose.yml` (compatível com Amazon RDS for PostgreSQL).
+  - SQLAlchemy + Pydantic schemas + modelo `Task`.
+  - CRUD completo de tarefas (`POST/GET/PUT/DELETE /tasks`).
+  - Devcontainer **não muda** — só ganha o `db` automaticamente.
 
 ## Referências
 
-- Issue da aula: [#1 — Aula 1](https://github.com/N-CPUninter/Computa-o-em-Nuvem---Projeto-exemplo-CloudTask-AI-SaaS/issues/1)
+- Issue da aula: [#2 — Aula 2](https://github.com/N-CPUninter/Computa-o-em-Nuvem---Projeto-exemplo-CloudTask-AI-SaaS/issues/2)
 - Lista completa de tarefas: [`docs/TAREFAS.md`](docs/TAREFAS.md)
 - Guia geral: [`docs/HOW_TO_USE.md`](docs/HOW_TO_USE.md)
 - Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
-- Exemplos didáticos de Dockerfile: [`exemplos/dockerfile/`](exemplos/dockerfile/)
+- Exemplos didáticos: [`exemplos/dockerfile/`](exemplos/dockerfile/)
 
 ## Licença
 

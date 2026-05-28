@@ -1,45 +1,45 @@
 // =============================================================================
-// devcontainer.json — CloudTask AI SaaS (Aula 1)
+// devcontainer.json — CloudTask AI SaaS (Aula 2)
 // -----------------------------------------------------------------------------
-// Sobe a aplicação em container e abre o VS Code dentro dele.
-// O aluno desenvolve cloud-native desde o primeiro dia: Linux + Python 3.11 +
-// usuário não-root, exatamente igual ao que rodará em EKS na Aula 8.
+// MUDANÇA em relação à Aula 1: migramos de `build` direto no Dockerfile
+// para `dockerComposeFile` apontando para `docker-compose.yml`. Isso prepara
+// a Aula 3, quando adicionaremos o serviço `db` (PostgreSQL 16 compatível
+// com Amazon RDS for PostgreSQL) ao mesmo compose — sem nenhuma mudança
+// aqui no devcontainer.
 //
 // Como usar:
 //   1. Instalar extensão "Dev Containers" (ms-vscode-remote.remote-containers)
 //   2. Abrir esta pasta no VS Code
 //   3. F1 → "Dev Containers: Reopen in Container"
 //
-// Evolução nas próximas aulas:
-//   * Aula 3 (PostgreSQL): este arquivo trocará "build" por "dockerComposeFile"
-//     apontando para docker-compose.yml com serviço `db` (Postgres 16,
-//     compatível com Amazon RDS for PostgreSQL).
-//   * Aula 4 (.env / config): adicionaremos "runArgs": ["--env-file=.env"]
-//     ou o equivalente via compose.
+// Subir tudo sem VS Code:
+//   docker compose up --build
+//
+// Simular produção:
+//   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
 // =============================================================================
 {
-  "name": "CloudTask AI SaaS — dev (semana 1)",
+  "name": "CloudTask AI SaaS — dev (semana 1, via compose)",
 
-  // Aula 1: usamos build direto no Dockerfile (target=dev).
-  "build": {
-    "context": "..",
-    "dockerfile": "../Dockerfile",
-    "target": "dev"
-  },
+  // Aula 2: o compose é a fonte da verdade para o ambiente.
+  "dockerComposeFile": ["../docker-compose.yml"],
 
-  // Pasta aberta dentro do container.
-  // O Dev Containers monta automaticamente o repo em /workspaces/<pasta>.
-  // Como nosso Dockerfile usa WORKDIR=/app, montamos lá também para o
-  // hot-reload do uvicorn pegar as alterações de `app/`.
+  // Serviço ao qual o VS Code se conecta. Em aulas futuras outros serviços
+  // (db, etc.) sobem juntos automaticamente.
+  "service": "api",
+
+  // Pasta aberta dentro do container. Bate com o `volumes: .:/app` do compose.
   "workspaceFolder": "/app",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind,consistency=cached",
+
+  // Quando o VS Code fechar, para os containers do compose (libera memória).
+  "shutdownAction": "stopCompose",
 
   // Usuário não-root criado no Dockerfile.
   "remoteUser": "appuser",
 
-  // Sobrescreve o CMD do Dockerfile e mantém o container vivo enquanto
-  // o VS Code estiver conectado. O uvicorn é iniciado manualmente pelo
-  // aluno (via terminal integrado ou debugger), o que facilita o ensino.
+  // Mantém o container vivo enquanto o VS Code estiver conectado.
+  // O uvicorn é iniciado manualmente pelo aluno (terminal ou debugger),
+  // o que facilita o ensino e o debug interativo.
   "overrideCommand": true,
 
   // Features = "add-ons" oficiais instalados dentro do container.
@@ -84,6 +84,8 @@
   "postCreateCommand": "python -V && pip list",
 
   // Portas encaminhadas automaticamente para o host.
+  // (As mesmas portas já estão publicadas pelo compose; aqui é só metadata
+  // para o painel "Ports" do VS Code mostrar rótulos amigáveis.)
   "forwardPorts": [8000, 5678],
   "portsAttributes": {
     "8000": { "label": "FastAPI",  "onAutoForward": "notify" },
