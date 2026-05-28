@@ -4,6 +4,10 @@ Este projeto é um **mini SaaS de gerenciamento de tarefas** em Python + FastAPI
 
 > Se você está abrindo o repo pela primeira vez na semana 1, leia até o final desta página antes de pedir ajuda.
 
+> 🆕 **Nunca usou terminal, Docker ou AWS?** Comece pelo guia passo a passo
+> **do absoluto zero**: [`aws-academy-setup.md`](aws-academy-setup.md). Ele
+> cobre instalação de todas as ferramentas e a configuração do AWS Academy.
+
 ---
 
 ## 1. Pré-requisitos

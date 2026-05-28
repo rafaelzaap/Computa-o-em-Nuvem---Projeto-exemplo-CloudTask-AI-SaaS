@@ -87,6 +87,10 @@ Exemplos didáticos de referência (Dockerfile, futuro: CDK, K8s, ...):
 
 Guia rápido (passo a passo, comandos e pré-requisitos): [`docs/HOW_TO_USE.md`](docs/HOW_TO_USE.md).
 
+**Nunca usou terminal, Docker ou AWS?** Comece pelo guia do absoluto zero —
+instalação de todas as ferramentas e configuração do AWS Academy Learner Lab:
+[`docs/aws-academy-setup.md`](docs/aws-academy-setup.md).
+
 Resumo:
 
 ```bash
