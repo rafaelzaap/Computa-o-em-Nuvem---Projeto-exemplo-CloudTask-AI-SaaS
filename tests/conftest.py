@@ -54,11 +54,15 @@ def _test_database_url() -> str:
 def _ensure_database_exists(db_url: str) -> None:
     """Cria o banco de testes caso ele ainda não exista.
 
-    Conecta no banco ``template1`` em modo AUTOCOMMIT — POR QUÊ:
+    Conecta no banco padrão da aplicação (``settings.database_url``, normalmente
+    ``cloudtask``) em modo AUTOCOMMIT — POR QUÊ:
         * ``CREATE DATABASE`` não pode rodar dentro de uma transação.
-        * ``template1`` está SEMPRE presente em qualquer cluster PostgreSQL
-          (diferente do banco ``postgres``, que pode não ser criado quando
-          ``POSTGRES_DB`` define outro nome na imagem oficial).
+        * Reaproveitamos a URL que JÁ SABEMOS estar funcionando (a app conecta
+          ali). Evita assumir que ``postgres`` / ``template1`` aceitam conexão
+          com as mesmas credenciais — em algumas imagens isso difere.
+        * O usuário ``cloudtask`` é superusuário, então pode criar bancos a
+          partir de qualquer banco existente.
+
     Se o banco de testes já existe, não faz nada.
 
     Args:
@@ -66,7 +70,7 @@ def _ensure_database_exists(db_url: str) -> None:
     """
     url = make_url(db_url)
     admin_engine = create_engine(
-        url.set(database="template1"), isolation_level="AUTOCOMMIT"
+        settings.database_url, isolation_level="AUTOCOMMIT"
     )
     try:
         with admin_engine.connect() as conn:
