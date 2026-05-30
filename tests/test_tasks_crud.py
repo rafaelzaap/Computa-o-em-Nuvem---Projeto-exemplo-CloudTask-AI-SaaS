@@ -22,7 +22,10 @@ def _criar(client: TestClient, **campos: object) -> dict:
 class TestCreate:
     def test_cria_com_defaults(self, client: TestClient) -> None:
         body = _criar(client)
-        assert body["id"] == 1                 # tabela começa vazia (id reinicia)
+        # ID é gerado pelo banco; só checamos que veio um positivo.
+        # (Não exigimos id == 1: a sequência do PostgreSQL não recua com o
+        # rollback do teste, então o primeiro id depende da ordem de execução.)
+        assert isinstance(body["id"], int) and body["id"] >= 1
         assert body["status"] == "pending"
         assert body["priority"] == "medium"
         assert body["created_at"] is not None
