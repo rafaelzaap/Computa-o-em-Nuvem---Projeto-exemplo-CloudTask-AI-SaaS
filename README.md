@@ -92,6 +92,21 @@ updated_at   datetime    (atualizado pelo banco a cada PUT)
 
 ## Como rodar
 
+> ⚠️ **Ao mudar de semana (branch), faça REBUILD do devcontainer.**
+> A imagem do container é um snapshot congelado das dependências da branch em
+> que foi construída. Cada semana acrescenta libs novas em `requirements.txt`.
+> Sem rebuild, o `uvicorn` quebra com `ModuleNotFoundError` ao importar uma lib
+> que ainda não foi instalada e o Swagger sai do ar.
+>
+> No VS Code: `F1` → **Dev Containers: Rebuild and Reopen in Container**.
+>
+> Para saber se precisa rebuild antes de trocar de branch:
+> ```bash
+> git diff <branch-atual> <branch-destino> -- requirements.txt requirements-dev.txt requirements-test.txt Dockerfile docker-compose.yml
+> ```
+> Se mostrar diff → rebuild. Entre **aulas da mesma semana**, geralmente
+> código apenas — não precisa rebuild.
+
 ### 1) Devcontainer no VS Code (recomendado)
 
 ```text
