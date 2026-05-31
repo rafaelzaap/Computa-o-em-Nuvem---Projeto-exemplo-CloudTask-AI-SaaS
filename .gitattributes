@@ -1,0 +1,50 @@
+# =============================================================================
+# .gitattributes — normaliza line endings em LF no repositório E no disco,
+# em qualquer SO. POR QUÊ:
+#   * Sem isto, o git do Windows com core.autocrlf=true escreve CRLF na pasta.
+#     O git Linux do devcontainer (que NÃO autoconverte) vê CRLF ≠ LF do índice
+#     e marca TODOS os arquivos como modificados.
+#   * Também elimina o warning "LF will be replaced by CRLF the next time Git
+#     touches it" ao commitar pelo git bash do Windows.
+# `eol=lf` SOBRESCREVE o autocrlf: no checkout, o git escreve LF
+# independentemente do SO.
+# =============================================================================
+
+# Default: todo arquivo de texto detectado pelo git é normalizado para LF.
+* text=auto eol=lf
+
+# Scripts shell: SEMPRE LF (rodam em Linux/Docker).
+*.sh    text eol=lf
+*.bash  text eol=lf
+*.zsh   text eol=lf
+.zshrc  text eol=lf
+
+# Código Python/YAML/JSON/Markdown: LF explícito.
+*.py    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.toml  text eol=lf
+*.cfg   text eol=lf
+*.ini   text eol=lf
+
+# Arquivos do Windows que existem nestes diretórios costumam querer CRLF —
+# mas neste repo não temos esse caso. Mantemos LF universal.
+
+# Binários: NUNCA tocar (sem normalização, sem diff de texto).
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.svg   binary
+*.pdf   binary
+*.zip   binary
+*.tar   binary
+*.gz    binary
+*.tgz   binary
+*.pptx  binary
+*.xlsx  binary
+*.docx  binary
+*.pyc   binary
