@@ -119,7 +119,11 @@ typeset -g _CT_FULL_PROMPT="$PROMPT"
 typeset -g _CT_FULL_RPROMPT="$RPROMPT"
 
 _ct_transient_line_finish() {
-    PROMPT='%F{8}[%D{%Y-%m-%d %H:%M:%S}]%f > '
+    # Mantém os markers OSC 633 do VS Code shell integration:
+    #   \e]633;A\a = início do prompt (sticky scroll ancora aqui)
+    #   \e]633;B\a = fim do prompt / início do comando
+    # `%{ %}` diz ao zsh que esses bytes NÃO ocupam espaço visível.
+    PROMPT=$'%{\e]633;A\a%}%F{8}[%D{%Y-%m-%d %H:%M:%S}]%f > %{\e]633;B\a%}'
     RPROMPT=''
     zle reset-prompt
 }
