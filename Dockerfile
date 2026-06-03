@@ -30,10 +30,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tini \
  && rm -rf /var/lib/apt/lists/* \
- && groupadd --system --gid 1001 appgroup \
- && useradd  --system --uid 1001 --gid appgroup --home /home/appuser appuser \
+ && groupadd --system --gid 1001 appuser \
+ && useradd  --system --uid 1001 --gid appuser --home /home/appuser appuser \
  && mkdir -p /app /home/appuser/.local \
- && chown -R appuser:appgroup /app /home/appuser
+ && chown -R appuser:appuser /app /home/appuser
 
 WORKDIR /app
 
@@ -60,8 +60,8 @@ RUN pip install --no-cache-dir --user -r requirements-dev.txt
 # ---------------------------------------------------------------------------
 FROM base AS prod
 
-COPY --from=builder-prod --chown=appuser:appgroup /root/.local /home/appuser/.local
-COPY --chown=appuser:appgroup app/ /app/app/
+COPY --from=builder-prod --chown=appuser:appuser /root/.local /home/appuser/.local
+COPY --chown=appuser:appuser app/ /app/app/
 
 USER appuser
 EXPOSE 8000
@@ -81,7 +81,18 @@ CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT}"]
 # ---------------------------------------------------------------------------
 FROM base AS dev
 
-COPY --from=builder-dev --chown=appuser:appgroup /root/.local /home/appuser/.local
+# `sudo` SOMENTE no target dev (nunca no prod). POR QUÊ: o devcontainer roda
+# como `appuser` (não-root) e o post-create.sh precisa criar /commandhistory
+# e ajustar dono — só com sudo.
+# IMPACTO: conveniência de desenvolvimento. RISCO: sudo numa imagem de produção
+# aumentaria a superfície de ataque — por isso ele fica fora do target `prod`.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends sudo \
+ && rm -rf /var/lib/apt/lists/* \
+ && echo "appuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/appuser \
+ && chmod 0440 /etc/sudoers.d/appuser
+
+COPY --from=builder-dev --chown=appuser:appuser /root/.local /home/appuser/.local
 
 USER appuser
 

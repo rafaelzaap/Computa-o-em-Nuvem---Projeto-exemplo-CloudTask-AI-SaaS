@@ -1,16 +1,24 @@
 // =============================================================================
-// devcontainer.json — CloudTask AI SaaS (Aula 2)
+// devcontainer.json — CloudTask AI SaaS (Semana 1)
 // -----------------------------------------------------------------------------
-// MUDANÇA em relação à Aula 1: migramos de `build` direto no Dockerfile
-// para `dockerComposeFile` apontando para `docker-compose.yml`. Isso prepara
-// a Aula 3, quando adicionaremos o serviço `db` (PostgreSQL 16 compatível
-// com Amazon RDS for PostgreSQL) ao mesmo compose — sem nenhuma mudança
-// aqui no devcontainer.
+// O VS Code abre o projeto DENTRO do container `api` (definido no
+// docker-compose.yml). O terminal integrado já é o Linux do container.
+//
+// MUDANÇA-CHAVE em relação à versão anterior:
+//   * overrideCommand: false  ->  o container roda o CMD do Dockerfile target
+//     `dev` (uvicorn --reload). A API sobe SOZINHA quando o devcontainer abre.
+//     Antes, com overrideCommand:true, o VS Code substituía o CMD por
+//     "sleep infinity" e o uvicorn nunca era iniciado.
+//   * Adicionada a feature `common-utils` (zsh + oh-my-zsh) e o
+//     post-create.sh que instala plugins e aplica o .zshrc do projeto.
+//   * Mount nomeado `cloudtask-zsh-history` para o histórico do zsh
+//     sobreviver a rebuilds do container.
 //
 // Como usar:
 //   1. Instalar extensão "Dev Containers" (ms-vscode-remote.remote-containers)
 //   2. Abrir esta pasta no VS Code
-//   3. F1 → "Dev Containers: Reopen in Container"
+//   3. F1 → "Dev Containers: Rebuild and Reopen in Container"
+//      (Rebuild porque mudaram features, mounts e CMD.)
 //
 // Subir tudo sem VS Code:
 //   docker compose up --build
@@ -21,7 +29,7 @@
 {
   "name": "CloudTask AI SaaS — dev (semana 1, via compose)",
 
-  // Aula 2: o compose é a fonte da verdade para o ambiente.
+  // O compose é a fonte da verdade para o ambiente.
   "dockerComposeFile": ["../docker-compose.yml"],
 
   // Serviço ao qual o VS Code se conecta. Em aulas futuras outros serviços
@@ -37,16 +45,47 @@
   // Usuário não-root criado no Dockerfile.
   "remoteUser": "appuser",
 
-  // Mantém o container vivo enquanto o VS Code estiver conectado.
-  // O uvicorn é iniciado manualmente pelo aluno (terminal ou debugger),
-  // o que facilita o ensino e o debug interativo.
-  "overrideCommand": true,
+  // overrideCommand=false: usa o CMD do Dockerfile target `dev` (uvicorn
+  // --reload), então a API sobe sozinha ao abrir o devcontainer. Acesse
+  // http://localhost:8000/docs.
+  // Logs aparecem em `docker compose logs -f api`.
+  // Para depurar com breakpoints: pare a API (`docker compose stop api`) e
+  // rode manualmente sob o debugger, ou use attach na porta 5678.
+  "overrideCommand": false,
 
-  // Features = "add-ons" oficiais instalados dentro do container.
+  // ---------------------------------------------------------------------------
+  // Features = "add-ons" oficiais instalados no container durante o build.
+  // ---------------------------------------------------------------------------
   "features": {
+    // common-utils: instala zsh + oh-my-zsh e define o zsh como shell padrão
+    // para `appuser`. Plugins externos e o .zshrc do projeto são aplicados no
+    // post-create.sh.
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "installOhMyZsh": true,
+      "installOhMyZshConfig": true,
+      "configureZshAsDefaultShell": true,
+      "username": "appuser",
+      "upgradePackages": false
+    },
+
+    // Git e GitHub CLI: commitar/abrir PRs de dentro do container.
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
+
+  // ---------------------------------------------------------------------------
+  // Mounts extras.
+  // Volume nomeado para o histórico do zsh sobreviver a rebuilds do container.
+  // ---------------------------------------------------------------------------
+  "mounts": [
+    "source=cloudtask-zsh-history,target=/commandhistory,type=volume"
+  ],
+
+  // Roda UMA vez, após o container ser criado.
+  // Instala plugins zsh, aplica o .zshrc, ajusta git config (safe.directory,
+  // fileMode) e prepara /commandhistory.
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
 
   // Extensões e configurações do VS Code aplicadas automaticamente.
   "customizations": {
@@ -68,24 +107,24 @@
           "source.fixAll.ruff": "explicit",
           "source.organizeImports.ruff": "explicit"
         },
-        "[python]": {
-          "editor.defaultFormatter": "charliermarsh.ruff"
-        },
+        "[python]": { "editor.defaultFormatter": "charliermarsh.ruff" },
         "files.exclude": {
           "**/__pycache__": true,
           "**/.pytest_cache": true,
           "**/.ruff_cache": true
-        }
+        },
+        // Usa o zsh (com oh-my-zsh) no terminal integrado do VS Code.
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        // Shell integration: necessário para o sticky scroll funcionar (linha
+        // do comando fica fixa no topo quando a saída é longa).
+        "terminal.integrated.shellIntegration.enabled": true,
+        "terminal.integrated.stickyScroll.enabled": true,
+        "terminal.integrated.shellIntegration.decorationsEnabled": "both"
       }
     }
   },
 
-  // Roda uma vez, logo após o container subir pela primeira vez.
-  "postCreateCommand": "python -V && pip list",
-
   // Portas encaminhadas automaticamente para o host.
-  // (As mesmas portas já estão publicadas pelo compose; aqui é só metadata
-  // para o painel "Ports" do VS Code mostrar rótulos amigáveis.)
   "forwardPorts": [8000, 5678],
   "portsAttributes": {
     "8000": { "label": "FastAPI",  "onAutoForward": "notify" },
