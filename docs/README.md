@@ -45,7 +45,7 @@ Tutoriais com comandos. Cada arquivo é um exercício prático que você pode (e
 | [`praticas/06-uploads-modo-s3.md`](praticas/06-uploads-modo-s3.md) | Criar bucket S3, trocar `.env`, validar URL pré-assinada |
 | [`praticas/07-rodar-testes.md`](praticas/07-rodar-testes.md) | Rodar `pytest` no devcontainer e em container isolado |
 | [`praticas/08-debug-vscode.md`](praticas/08-debug-vscode.md) | Depurar com breakpoints no VS Code (debugpy attach) |
-| [`praticas/09-deploy-manual-aws.md`](praticas/09-deploy-manual-aws.md) | Deploy manual AWS: ECR, ECS Fargate, EKS, RDS, Secrets Manager, DynamoDB (por semana) |
+| [`praticas/09-deploy-manual-aws.md`](praticas/09-deploy-manual-aws.md) | Deploy manual AWS: ECR, ECS Fargate (API simples + Semana 2 didática com Postgres container e demo de perda de dados), EKS, RDS, Secrets Manager, CodeBuild+GitHub, DynamoDB (por semana) |
 | [`praticas/99-troubleshooting.md`](praticas/99-troubleshooting.md) | Erros comuns + como resolver |
 
 > 💡 **Os práticos não dependem todos uns dos outros.** Mas se está perdido,

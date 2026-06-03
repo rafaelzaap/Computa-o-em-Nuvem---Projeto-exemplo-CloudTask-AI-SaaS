@@ -22,7 +22,8 @@
 | **A.** Criar bucket S3 (sanity check) | Semana 3 | [§1](#1-semana-3--bucket-s3-sanity-check) |
 | **B.** Linkar repo GitHub → AWS (CodeBuild) | Semana 4 | [§2](#2-semana-4--linkar-github-na-aws-via-codebuild) |
 | **C.** Push da imagem para ECR | Semana 4 | [§3](#3-semana-4--push-da-imagem-para-ecr) |
-| **D.** Subir API em **ECS Fargate** (atalho simples) | Semana 4 (opcional) | [§4](#4-semana-4-opcional--ecs-fargate-deploy-simples) |
+| **D.** Subir API em **ECS Fargate** (API simples) | Semana 4 (opcional) | [§4A](#4a-semana-4-opcional--ecs-fargate-api-simples) |
+| **D2.** **Semana 2 didática:** Fargate com API + **Postgres container** + Secrets Manager + demo de **perda de dados** | Semana 2 (opcional) | [§4B](#4b-semana-2-opcional--fargate-com-postgres-em-container-didatico) |
 | **E.** Provisionar **EKS** com `eksctl` | Semana 5 | [§5](#5-semana-5--provisionar-eks-com-eksctl) |
 | **F.** Subir API no EKS com Postgres em **container** | Semana 5 | [§6](#6-semana-5--subir-api-no-eks-com-postgres-em-container) |
 | **G.** Trocar Postgres por **RDS** | Semana 6/8 | [§7](#7-semana-68--trocar-postgres-por-rds) |
@@ -196,7 +197,7 @@ aws ecr list-images --repository-name cloudtask-api
 
 ---
 
-## 4. Semana 4 (opcional) — ECS Fargate (deploy simples)
+## 4A. Semana 4 (opcional) — ECS Fargate (API simples)
 
 > **Quando:** Aula 7, **antes** de partir para EKS. Serve como
 > **comparação**: "olha como Fargate é simples; agora veja o poder do EKS".
@@ -245,6 +246,267 @@ aws ecs update-service --cluster cloudtask-fargate \
 aws ecs delete-service --cluster cloudtask-fargate \
   --service cloudtask-api --force
 aws ecs delete-cluster --cluster cloudtask-fargate
+```
+
+---
+
+## 4B. Semana 2 (opcional) — Fargate com Postgres em container (didático)
+
+> **Objetivo didático:** subir a aplicação da Semana 2 (FastAPI + Postgres) no
+> Fargate com o **banco como container ao lado da API**, configurar `.env`
+> em **Secrets Manager** e **provar empiricamente** por que produção precisa
+> de RDS (a perda de dados ao reiniciar a task).
+>
+> **Quando:** Semana 2 (opcional, depois do código local rodar).
+> **Tempo:** 60–90 min. **Custo Learner Lab:** ~$0,50 em 2 h.
+>
+> **Pré-req desta seção:** ECR já existente ([§3](#3-semana-4--push-da-imagem-para-ecr))
+> com a imagem `cloudtask-api:latest` empurrada.
+
+### 4B.1. Por que isso é didático (e arriscado na vida real)
+
+| Risco | O que acontece |
+| --- | --- |
+| **Perda de dados** | Fargate **não tem disco local persistente**. Restart da task → banco vazio. |
+| Sem backup automático | Nenhum snapshot. Acidente = recriação manual. |
+| Sem Multi-AZ | AZ cai → API e banco caem juntos. |
+| Migrações frágeis | Cada restart roda `create_all` de novo, sem versionamento de schema. |
+
+O exercício é exatamente para você **sentir** isso. Vamos: subir → criar
+tarefas → forçar restart → constatar que sumiu → concluir que produção
+precisa de RDS ([§7](#7-semana-68--trocar-postgres-por-rds)).
+
+### 4B.2. Arquitetura
+
+```text
+   ┌──────────────────────────────────────────┐
+   │      ECS Fargate Task (1 task)           │
+   │  ┌──────────────┐    ┌────────────────┐  │
+   │  │ api          │◄──►│ db (postgres)  │  │
+   │  │ uvicorn:8000 │    │ :5432          │  │
+   │  └──────────────┘    └────────────────┘  │
+   │   2 containers / 1 task = comunicam via localhost
+   └──────────────────────────────────────────┘
+              │ Public IP :8000
+              ▼ usuário
+```
+
+### 4B.3. Subir o `.env` no AWS Secrets Manager
+
+```bash
+# 1. Gerar segredos
+export PG_PASSWORD="$(openssl rand -hex 16)"
+export SECRET_KEY="$(openssl rand -hex 32)"
+
+# 2. Criar secret JSON
+aws secretsmanager create-secret \
+  --name cloudtask/semana02/dev \
+  --description "Env semana-02 Fargate" \
+  --secret-string "{
+    \"POSTGRES_USER\":\"cloudtask\",
+    \"POSTGRES_PASSWORD\":\"$PG_PASSWORD\",
+    \"POSTGRES_DB\":\"cloudtask\",
+    \"DATABASE_URL\":\"postgresql://cloudtask:$PG_PASSWORD@localhost:5432/cloudtask\",
+    \"SECRET_KEY\":\"$SECRET_KEY\",
+    \"APP_ENV\":\"production\",
+    \"LOG_LEVEL\":\"INFO\"
+  }"
+
+# 3. Capturar ARN
+export SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id cloudtask/semana02/dev --query ARN --output text)
+echo "SECRET_ARN=$SECRET_ARN"
+```
+
+> 💡 `localhost:5432` no `DATABASE_URL` funciona porque os 2 containers
+> compartilham a mesma rede dentro da task Fargate.
+
+### 4B.4. Task Definition com 2 containers
+
+> Imagem da API já no ECR (vinda do [§3](#3-semana-4--push-da-imagem-para-ecr)).
+> Build/push opcionalmente automatizado pelo CodeBuild ([§2](#2-semana-4--linkar-github-na-aws-via-codebuild)).
+
+Crie `infra/aws/task-def-semana02.json`:
+
+```json
+{
+  "family": "cloudtask-semana02",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/LabRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/LabRole",
+  "containerDefinitions": [
+    {
+      "name": "db",
+      "image": "postgres:16-alpine",
+      "essential": true,
+      "portMappings": [{ "containerPort": 5432, "protocol": "tcp" }],
+      "secrets": [
+        { "name": "POSTGRES_USER",     "valueFrom": "SECRET_ARN:POSTGRES_USER::" },
+        { "name": "POSTGRES_PASSWORD", "valueFrom": "SECRET_ARN:POSTGRES_PASSWORD::" },
+        { "name": "POSTGRES_DB",       "valueFrom": "SECRET_ARN:POSTGRES_DB::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/cloudtask-semana02",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "db",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+    {
+      "name": "api",
+      "image": "ECR_REPO_URI:latest",
+      "essential": true,
+      "dependsOn": [{ "containerName": "db", "condition": "START" }],
+      "portMappings": [{ "containerPort": 8000, "protocol": "tcp" }],
+      "secrets": [
+        { "name": "DATABASE_URL", "valueFrom": "SECRET_ARN:DATABASE_URL::" },
+        { "name": "SECRET_KEY",   "valueFrom": "SECRET_ARN:SECRET_KEY::"   },
+        { "name": "APP_ENV",      "valueFrom": "SECRET_ARN:APP_ENV::"      },
+        { "name": "LOG_LEVEL",    "valueFrom": "SECRET_ARN:LOG_LEVEL::"    }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/cloudtask-semana02",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "api",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}
+```
+
+Resolver placeholders e registrar:
+
+```bash
+mkdir -p infra/aws
+sed -e "s|ACCOUNT_ID|$ACCOUNT_ID|g" \
+    -e "s|ECR_REPO_URI|$ECR|g" \
+    -e "s|SECRET_ARN|$SECRET_ARN|g" \
+    infra/aws/task-def-semana02.json > /tmp/task-def-resolved.json
+
+aws ecs register-task-definition \
+  --cli-input-json file:///tmp/task-def-resolved.json
+```
+
+> 💡 **Sintaxe `SECRET_ARN:CHAVE::`** no `valueFrom`: o ECS faz lookup do
+> secret e extrai a chave do JSON automaticamente.
+
+### 4B.5. Cluster, Security Group e Service
+
+```bash
+# Cluster (reusa o cloudtask-fargate se ainda existir do §4A)
+aws ecs create-cluster --cluster-name cloudtask-fargate 2>/dev/null || true
+
+# VPC default + subnets públicas
+export VPC_ID=$(aws ec2 describe-vpcs --filters Name=is-default,Values=true \
+  --query "Vpcs[0].VpcId" --output text)
+export SUBNETS=$(aws ec2 describe-subnets \
+  --filters "Name=vpc-id,Values=$VPC_ID" \
+            "Name=map-public-ip-on-launch,Values=true" \
+  --query "Subnets[].SubnetId" --output text | tr '\t' ',')
+
+# Security Group permitindo 8000
+aws ec2 create-security-group \
+  --group-name cloudtask-semana02-sg \
+  --description "Allow 8000 (didactic)" --vpc-id $VPC_ID
+export SG_ID=$(aws ec2 describe-security-groups \
+  --filters Name=group-name,Values=cloudtask-semana02-sg \
+  --query "SecurityGroups[0].GroupId" --output text)
+aws ec2 authorize-security-group-ingress \
+  --group-id $SG_ID --protocol tcp --port 8000 --cidr 0.0.0.0/0
+
+# Service Fargate
+aws ecs create-service \
+  --cluster cloudtask-fargate \
+  --service-name cloudtask-semana02 \
+  --task-definition cloudtask-semana02 \
+  --desired-count 1 --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG_ID],assignPublicIp=ENABLED}"
+
+aws ecs wait services-stable \
+  --cluster cloudtask-fargate --services cloudtask-semana02
+```
+
+### 4B.6. Pegar Public IP e testar
+
+```bash
+export TASK_ARN=$(aws ecs list-tasks --cluster cloudtask-fargate \
+  --service-name cloudtask-semana02 --query "taskArns[0]" --output text)
+export ENI_ID=$(aws ecs describe-tasks --cluster cloudtask-fargate \
+  --tasks $TASK_ARN \
+  --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value | [0]" \
+  --output text)
+export PUBLIC_IP=$(aws ec2 describe-network-interfaces \
+  --network-interface-ids $ENI_ID \
+  --query "NetworkInterfaces[0].Association.PublicIp" --output text)
+echo "API publicada em http://$PUBLIC_IP:8000"
+
+curl http://$PUBLIC_IP:8000/health
+curl http://$PUBLIC_IP:8000/health/ready
+```
+
+### 4B.7. Demonstração da perda de dados
+
+```bash
+# 1. Criar 5 tarefas
+for i in 1 2 3 4 5; do
+  curl -sX POST http://$PUBLIC_IP:8000/tasks \
+    -H "Content-Type: application/json" \
+    -d "{\"title\":\"Tarefa Fargate #$i\",\"priority\":\"high\"}"
+done
+curl -s http://$PUBLIC_IP:8000/tasks | jq 'length'
+# 5
+
+# 2. Forçar restart
+aws ecs stop-task --cluster cloudtask-fargate --task $TASK_ARN \
+  --reason "demo perda de dados sem volume"
+aws ecs wait services-stable \
+  --cluster cloudtask-fargate --services cloudtask-semana02
+
+# 3. Recapturar IP (task nova = IP novo)
+export TASK_ARN=$(aws ecs list-tasks --cluster cloudtask-fargate \
+  --service-name cloudtask-semana02 --query "taskArns[0]" --output text)
+export ENI_ID=$(aws ecs describe-tasks --cluster cloudtask-fargate \
+  --tasks $TASK_ARN \
+  --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value | [0]" \
+  --output text)
+export PUBLIC_IP=$(aws ec2 describe-network-interfaces \
+  --network-interface-ids $ENI_ID \
+  --query "NetworkInterfaces[0].Association.PublicIp" --output text)
+
+# 4. Conferir os dados
+curl -s http://$PUBLIC_IP:8000/tasks | jq
+# []
+```
+
+> 🎯 **DEMONSTRADO.** 5 tarefas perdidas. Esquema recriado pelo `create_all`,
+> dados não voltam. Em produção isso = clientes perdendo trabalho. Conclusão:
+> ir para **RDS** ([§7](#7-semana-68--trocar-postgres-por-rds)).
+
+### 4B.8. Cleanup específico
+
+(Os recursos do §4A e §4B compartilham o cluster. O cleanup geral em
+[§11](#11-sempre--cleanup-obrigatorio) cobre tudo. Itens próprios desta
+seção:)
+
+```bash
+aws ecs update-service --cluster cloudtask-fargate \
+  --service cloudtask-semana02 --desired-count 0
+aws ecs delete-service --cluster cloudtask-fargate \
+  --service cloudtask-semana02 --force
+aws ec2 delete-security-group --group-id $SG_ID
+aws secretsmanager delete-secret \
+  --secret-id cloudtask/semana02/dev --force-delete-without-recovery
+aws logs delete-log-group --log-group-name /ecs/cloudtask-semana02
 ```
 
 ---
@@ -613,7 +875,8 @@ houver gasto, alguma coisa escapou.
 | --- | :---: | :---: |
 | Criar bucket S3 | ⭐ | Aula 5 |
 | Login + push ECR | ⭐⭐ | Aula 7 |
-| ECS Fargate Console | ⭐⭐ | Aula 7 (opcional) |
+| ECS Fargate Console (API simples) | ⭐⭐ | Aula 7 (opcional) |
+| **Fargate API + Postgres container + Secrets** (didático) | ⭐⭐⭐⭐ | **Semana 2 (opcional)** |
 | CodeBuild + GitHub | ⭐⭐⭐ | Aula 7 |
 | EKS + manifests | ⭐⭐⭐⭐ | Aula 8 |
 | Postgres como Pod | ⭐⭐ | Aula 8 |
