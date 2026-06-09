@@ -218,22 +218,71 @@ echo "Abra http://localhost:30080/docs"
 
 ## 7. Ver o Service balanceando entre os 2 Pods
 
-```bash
-# Loop chamando a API e olhando qual Pod respondeu
-for i in $(seq 1 10); do
-  POD=$(curl -s http://localhost:30080/health | jq -r '.pod // "n/a"')
-  echo "request $i -> $POD"
-done
+A API roda em **2 réplicas** (2 Pods). O `Service` distribui as requisições
+entre eles. Mas como **ver** isso acontecer?
+
+> ❌ **Não dá para usar o `/health` para isso.** O endpoint `/health` da
+> CloudTask **não devolve o nome do Pod** que respondeu — então um loop que
+> chama `/health` não consegue dizer qual Pod atendeu.
+
+A forma que **funciona**: olhar os **logs dos 2 Pods ao mesmo tempo** num
+terminal e **disparar requisições** noutro. Cada requisição vira uma linha
+de log no Pod que a atendeu — com `--prefix`, o `kubectl` carimba o **nome
+do Pod** em cada linha. Você vê as linhas alternando entre os dois Pods.
+
+### Precisa de DOIS terminais (PowerShell)
+
+> Os dois podem ser abas/janelas do **PowerShell no host** (ou no
+> devcontainer — `kubectl` funciona nos dois). Abra os dois **antes** de
+> começar.
+
+**Terminal 1 — seguir os logs dos 2 Pods (deixe rodando):**
+
+```powershell
+# --prefix  -> carimba [pod/api-xxxx/api] em cada linha (mostra QUAL Pod)
+# --tail=0  -> ignora o histórico; só mostra linhas NOVAS a partir de agora
+# -f        -> "follow": fica preso seguindo (não retorna sozinho)
+kubectl logs -n cloudtask -l app=api -f --prefix --tail=0
 ```
 
-> ⚠️ O endpoint `/health` da CloudTask não devolve nome do Pod hoje. Para
-> ver o balanceamento na prática, abra **2 terminais** e use:
->
-> ```bash
-> kubectl logs -n cloudtask -l app=api -f
-> ```
->
-> Repare nos `INFO` de "GET /tasks" alternando entre os Pods.
+Esse comando **trava** seguindo os logs — é o comportamento esperado.
+Deixe-o aberto.
+
+**Terminal 2 — disparar 20 requisições, uma por vez:**
+
+```powershell
+foreach ($i in 1..20) {
+  curl.exe -s http://localhost:30080/tasks | Out-Null
+  Start-Sleep -Milliseconds 200
+}
+```
+
+> 💡 `curl.exe` (com `.exe`) e **não** `curl` — no PowerShell, `curl` é
+> apelido de `Invoke-WebRequest`, que tem outra sintaxe. O `.exe` força o
+> curl de verdade. `Out-Null` joga fora o corpo da resposta (só queremos
+> gerar tráfego).
+
+### O que observar
+
+No **Terminal 1**, conforme o Terminal 2 dispara, aparecem linhas de
+`GET /tasks` **com prefixos de Pod diferentes alternando**, por exemplo:
+
+```text
+[pod/api-774964db5f-k2q24/api] INFO:  10.244.0.1:0 - "GET /tasks HTTP/1.1" 200 OK
+[pod/api-774964db5f-l4mhc/api] INFO:  10.244.0.1:0 - "GET /tasks HTTP/1.1" 200 OK
+[pod/api-774964db5f-k2q24/api] INFO:  10.244.0.1:0 - "GET /tasks HTTP/1.1" 200 OK
+[pod/api-774964db5f-l4mhc/api] INFO:  10.244.0.1:0 - "GET /tasks HTTP/1.1" 200 OK
+```
+
+Dois nomes de Pod (`...k2q24` e `...l4mhc`) se revezando = **o Service está
+balanceando**. `Ctrl+C` no Terminal 1 para sair.
+
+> ⚠️ **Não viu alternar?** O `Service`/`kube-proxy` balanceia **por
+> conexão**. Cada `curl.exe` abre uma conexão nova, então deveria revezar —
+> mas a distribuição é aleatória, não um-a-um perfeito. Dispare **mais**
+> requisições (suba o `1..20` para `1..50`) e você verá os dois Pods
+> aparecerem. Se **só um** Pod aparecer sempre, confira que há 2 Pods
+> `Running`: `kubectl get pods -n cloudtask`.
 
 ---
 
