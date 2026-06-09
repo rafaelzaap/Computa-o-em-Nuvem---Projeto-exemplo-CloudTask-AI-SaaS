@@ -1,4 +1,4 @@
-# Prática 11 — Kubernetes local com Kind (Aula 6)
+# Prática 10 — Kubernetes local com Kind (Aula 6)
 
 > **Objetivo:** subir a CloudTask em um **cluster Kubernetes local** usando
 > [**Kind**](https://kind.sigs.k8s.io/) (Kubernetes IN Docker). Você verá:
