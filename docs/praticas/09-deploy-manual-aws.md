@@ -88,9 +88,11 @@ CodeBuild é **serverless** (paga só por minuto rodando), nativo da AWS e
 integra com ECR/EKS sem extra. Para esta disciplina, é o caminho mais
 didático para **ver o pipeline acontecer dentro da AWS**.
 
-> Limite Learner Lab: CodeBuild **funciona**, mas não consegue criar
-> webhooks privados (não tem permissão `iam:PassRole` ampla). Vamos buildar
-> **on-demand** (acionado manualmente).
+> Limite Learner Lab: o CodeBuild **roda**, mas a role `voclabs` **não
+> autoriza** `codebuild:ImportSourceCredentials` (conectar GitHub privado)
+> nem webhooks. No Academy a fonte do build vem de um **zip no S3**
+> ([§2.2-Academy](#22-academy--fonte-do-build-via-s3-sem-github)) e o build
+> é disparado **on-demand** (manual).
 
 ### Passos
 
@@ -100,7 +102,23 @@ didático para **ver o pipeline acontecer dentro da AWS**.
 2. Permissões mínimas: `repo` (público) ou `repo` + `read:org` (privado).
 3. Copie o token (`ghp_...`).
 
-#### 2.2. Conectar no CodeBuild via CLI
+#### 2.2. Conectar o GitHub no CodeBuild via CLI (conta AWS PRÓPRIA)
+
+> ⚠️ **Este comando só funciona em conta AWS própria/privada** (com IAM
+> amplo). **No AWS Academy / Learner Lab ele FALHA** — a role `voclabs` não
+> tem a permissão `codebuild:ImportSourceCredentials`:
+>
+> ```text
+> An error occurred (AccessDeniedException) when calling the
+> ImportSourceCredentials operation: User: arn:aws:sts::...:assumed-role/
+> voclabs/... is not authorized to perform: codebuild:ImportSourceCredentials
+> ```
+>
+> Não há como liberar essa permissão no Academy (IAM travado). **Se você
+> está no Learner Lab, pule este comando** e use a alternativa via S3 logo
+> abaixo ([§2.2-Academy](#22-academy--fonte-do-build-via-s3-sem-github)).
+
+Em **conta própria**:
 
 ```bash
 aws codebuild import-source-credentials \
@@ -108,6 +126,43 @@ aws codebuild import-source-credentials \
   --auth-type PERSONAL_ACCESS_TOKEN \
   --token "ghp_SEU_TOKEN_AQUI"
 ```
+
+#### 2.2-Academy — Fonte do build via S3 (sem GitHub)
+
+No Learner Lab o CodeBuild não consegue clonar o GitHub (sem
+`ImportSourceCredentials`). Solução permitida pela role `voclabs`:
+**empacotar o código num zip, subir num bucket S3 e apontar o CodeBuild
+para esse zip**.
+
+```bash
+# 0. (uma vez) descobrir o ACCOUNT_ID — usado aqui e na §3
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "Account: $ACCOUNT_ID"
+
+# 1. criar (ou reutilizar) um bucket para o codigo-fonte
+export SRC_BUCKET=cloudtask-src-$ACCOUNT_ID
+aws s3 mb s3://$SRC_BUCKET --region us-east-1
+
+# 2. zipar o repo (sem .git e sem lixo) e enviar ao S3
+zip -r /tmp/source.zip . -x '.git/*' '*/__pycache__/*' '*.pyc'
+aws s3 cp /tmp/source.zip s3://$SRC_BUCKET/source.zip
+
+# 3. confirmar
+aws s3 ls s3://$SRC_BUCKET/
+```
+
+> 💡 **Windows sem `zip`?** No PowerShell use
+> `Compress-Archive -Path * -DestinationPath "$env:TEMP\source.zip" -Force`
+> (apague a pasta `.git` antes para não inflar o zip) e depois
+> `aws s3 cp "$env:TEMP\source.zip" s3://$SRC_BUCKET/source.zip`. O resto
+> dos comandos `aws` é igual nos dois shells.
+
+No projeto do CodeBuild (passo 2.4), em vez de **Source: GitHub**, escolha
+**Source: Amazon S3** e informe `s3://<SEU_SRC_BUCKET>/source.zip`. O resto
+(buildspec, env vars, LabRole) é idêntico.
+
+> 💡 A cada mudança no código, refaça o `zip` + `aws s3 cp` e dispare o
+> build de novo. É o "git push" manual do Academy.
 
 #### 2.3. Criar `buildspec.yml` na raiz do repo
 
@@ -141,6 +196,8 @@ Via Console (Learner Lab não autoriza tudo via CLI):
 
 1. Console → CodeBuild → Create build project.
 2. **Source:** GitHub → seu repo → branch `semana-04-eks-aws`.
+   - **No Academy:** escolha **Amazon S3** → `s3://cloudtask-src-<ACCOUNT_ID>/source.zip`
+     (ver [§2.2-Academy](#22-academy--fonte-do-build-via-s3-sem-github)).
 3. **Environment:**
    - Managed image, Ubuntu, Standard 7.0.
    - Privileged: **ON** (necessário para `docker build`).
@@ -158,39 +215,93 @@ push pro ECR.
 
 ## 3. Semana 4 — Push da imagem para ECR
 
-> **Quando:** Aula 7. **Caminho rápido** (sem CodeBuild) — build local +
-> push direto.
+> **Quando:** Aula 7. Duas formas de colocar a imagem no ECR:
+> - **A) Deploy direto** — build local + `docker push` (rápido, sem pipeline).
+> - **B) Via CodeBuild** — a AWS builda e dá push (usa o projeto da §2).
+>
+> Os dois precisam do **repositório ECR criado** primeiro (3.1).
+
+### 3.1. Criar o repositório ECR + descobrir o `<acct>`
+
+O `<acct>` é o **ID numérico da conta** (12 dígitos) e aparece em **toda
+URI do ECR**. Pegue-o por CLI — vale para conta própria **e** Learner Lab:
 
 ```bash
-# 1. criar repo
+# ID da conta (12 dígitos) — é o <acct> das URIs
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "Account: $ACCOUNT_ID"
+
+# criar o repositorio (idempotente: ignora erro se ja existir)
 aws ecr create-repository \
   --repository-name cloudtask-api \
-  --region us-east-1
+  --region us-east-1 2>/dev/null || true
 
-# 2. capturar URI
-export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+# montar a URI completa do repositorio
 export ECR=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api
 echo "ECR URI: $ECR"
+```
 
-# 3. login no ECR
+> 💡 Pelo Console o `<acct>` também aparece no **canto superior direito**
+> (Account ID) e na própria URI em **ECR → Repositories**.
+
+### 3.2. Caminho A — build local + push direto (sem CodeBuild)
+
+```bash
+# 1. login no ECR (usa o $ECR da 3.1)
 aws ecr get-login-password --region us-east-1 \
   | docker login --username AWS --password-stdin $ECR
 
-# 4. build prod
+# 2. build prod
 docker build --target prod -t cloudtask-api:v0.4.0 .
 
-# 5. tag + push
+# 3. tag + push
 docker tag cloudtask-api:v0.4.0 $ECR:v0.4.0
 docker tag cloudtask-api:v0.4.0 $ECR:latest
 docker push $ECR:v0.4.0
 docker push $ECR:latest
 
-# 6. listar
+# 4. listar
 aws ecr list-images --repository-name cloudtask-api
 ```
 
 > 💡 `target prod` garante imagem **sem dev tools** (menor superfície de
 > ataque + imagem menor).
+
+### 3.3. Caminho B — build via CodeBuild (push automático)
+
+Reaproveita o projeto criado na §2 — com fonte **GitHub** (conta própria)
+ou fonte **S3** (Academy, [§2.2-Academy](#22-academy--fonte-do-build-via-s3-sem-github)).
+O `buildspec.yml` (§2.3) faz login, build `target prod`, tag e push; o
+CodeBuild executa tudo na nuvem.
+
+```bash
+# 1. informar a URI do ECR ao projeto (env var ECR_REPO_URI da §2.4)
+#    Console -> CodeBuild -> seu projeto -> Edit -> Environment -> Env vars:
+#    ECR_REPO_URI = <acct>.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api
+echo "ECR_REPO_URI = $ECR"
+
+# 2. (Academy) reempacotar o codigo e subir ao S3 antes de cada build
+zip -r /tmp/source.zip . -x '.git/*' '*/__pycache__/*' '*.pyc'
+aws s3 cp /tmp/source.zip s3://cloudtask-src-$ACCOUNT_ID/source.zip
+
+# 3. disparar o build pela CLI (use o NOME do projeto que voce criou na 2.4)
+export BUILD_ID=$(aws codebuild start-build \
+  --project-name cloudtask-api \
+  --query 'build.id' --output text)
+echo "Build: $BUILD_ID"
+
+# 4. acompanhar o status (repita ate SUCCEEDED; ~2-4 min)
+aws codebuild batch-get-builds --ids $BUILD_ID \
+  --query 'builds[0].buildStatus' --output text
+# IN_PROGRESS -> SUCCEEDED
+
+# 5. confirmar a imagem no ECR
+aws ecr list-images --repository-name cloudtask-api
+```
+
+> 💡 Se `start-build` falhar por permissão no Academy, dispare pelo Console
+> (CodeBuild → projeto → **Start build**). O acompanhamento por CLI (passo
+> 4) continua valendo.
 
 **Cleanup do ECR:** seção [§11](#11-sempre--cleanup-obrigatorio).
 
@@ -578,8 +689,9 @@ aws rds delete-db-instance \
   --db-instance-identifier cloudtask-db \
   --skip-final-snapshot
 
-# 5. apagar bucket S3
+# 5. apagar buckets S3 (uploads e, se usou CodeBuild no Academy, o de fonte)
 aws s3 rb s3://$BUCKET --force
+aws s3 rb s3://cloudtask-src-$ACCOUNT_ID --force 2>/dev/null || true
 
 # 6. apagar repo ECR
 aws ecr delete-repository --repository-name cloudtask-api --force
