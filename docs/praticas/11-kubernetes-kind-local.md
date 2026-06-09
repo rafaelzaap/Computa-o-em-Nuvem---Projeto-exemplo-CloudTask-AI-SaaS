@@ -24,6 +24,17 @@
 
 ---
 
+> **🐚 PowerShell ou bash?** Quando a sintaxe **difere** entre shells, os
+> comandos aparecem em **duas versões**:
+> - **PowerShell** — terminal padrão do Windows (host).
+> - **Linux/macOS (bash)** — devcontainer, WSL, macOS ou Linux.
+>
+> Comandos de `kubectl`, `docker`, `kind` e `git` são **idênticos** nos dois
+> shells — esses aparecem **uma vez só** (rótulo `bash`, mas copie e cole no
+> PowerShell sem mudar nada).
+
+---
+
 ## 0. Por que Kind, e por que rodar no HOST
 
 `kind` cria um cluster Kubernetes onde **cada nó é um container Docker**.
@@ -140,14 +151,38 @@ kind load docker-image cloudtask-api:prod --name cloudtask
 
 ## 4. Criar o Secret real (a partir do template)
 
+Copie o template para `secret.yaml`:
+
+**PowerShell:**
+```powershell
+Copy-Item infra/k8s/secret.example.yaml infra/k8s/secret.yaml
+```
+
+**Linux/macOS (bash):**
 ```bash
 cp infra/k8s/secret.example.yaml infra/k8s/secret.yaml
 ```
 
-Gere valores reais e atualize `secret.yaml`:
+Gere valores reais (senha, chave e os campos já em base64) e atualize
+`secret.yaml`:
 
+**PowerShell:**
+```powershell
+# Helper: base64 de uma string (UTF-8, sem quebra de linha)
+function To-B64($s) { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s)) }
+
+# Senha e chave aleatórias em hex (16 e 32 bytes)
+$PG_PASS    = -join ((1..16) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
+$SECRET_KEY = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
+
+"POSTGRES_USER=$(To-B64 'cloudtask')"
+"POSTGRES_PASSWORD=$(To-B64 $PG_PASS)"
+"SECRET_KEY=$(To-B64 $SECRET_KEY)"
+"DATABASE_URL=$(To-B64 "postgresql://cloudtask:$PG_PASS@postgres:5432/cloudtask")"
+```
+
+**Linux/macOS (bash):**
 ```bash
-# DENTRO DO DEVCONTAINER (terminal do VS Code)
 PG_PASS="$(openssl rand -hex 16)"
 SECRET_KEY="$(openssl rand -hex 32)"
 
@@ -156,6 +191,10 @@ echo "POSTGRES_PASSWORD=$(echo -n "$PG_PASS" | base64)"
 echo "SECRET_KEY=$(echo -n "$SECRET_KEY" | base64)"
 echo "DATABASE_URL=$(echo -n "postgresql://cloudtask:$PG_PASS@postgres:5432/cloudtask" | base64)"
 ```
+
+> 💡 No bash, `base64` não quebra a linha para strings curtas; se a sua
+> versão quebrar, use `base64 -w0`. No PowerShell, `Get-Random` basta para
+> uma senha **local didática** — não use para segredos de produção.
 
 Cole os valores nos campos `data:` de `secret.yaml` e **adicione a entrada
 de `secret.yaml` no `kustomization.yaml`** (descomente a linha).
@@ -194,6 +233,29 @@ api-xxxxxxx-zzzzz           1/1     Running             0          25s
 
 ## 6. Testar a API
 
+**PowerShell:**
+```powershell
+# Health
+curl.exe http://localhost:30080/health
+# {"status":"ok"}
+
+# Ready (consulta o Postgres)
+curl.exe http://localhost:30080/health/ready
+# {"status":"ok","database":"ok"}
+
+# Criar tarefa
+curl.exe -X POST http://localhost:30080/tasks `
+  -H "Content-Type: application/json" `
+  -d '{"title":"Tarefa no K8s","priority":"high"}'
+
+# Listar
+curl.exe http://localhost:30080/tasks
+
+# Swagger
+Write-Host "Abra http://localhost:30080/docs"
+```
+
+**Linux/macOS (bash):**
 ```bash
 # Health
 curl http://localhost:30080/health
@@ -215,6 +277,11 @@ curl http://localhost:30080/tasks
 echo "Abra http://localhost:30080/docs"
 ```
 
+> 💡 No PowerShell use `curl.exe` (com `.exe`): `curl` puro é apelido de
+> `Invoke-WebRequest`, com outra sintaxe. A continuação de linha é a crase
+> (`` ` ``) no PowerShell e a barra (`\`) no bash. As aspas simples em volta
+> do JSON funcionam nos dois shells.
+
 ---
 
 ## 7. Ver o Service balanceando entre os 2 Pods
@@ -231,15 +298,16 @@ terminal e **disparar requisições** noutro. Cada requisição vira uma linha
 de log no Pod que a atendeu — com `--prefix`, o `kubectl` carimba o **nome
 do Pod** em cada linha. Você vê as linhas alternando entre os dois Pods.
 
-### Precisa de DOIS terminais (PowerShell)
+### Precisa de DOIS terminais
 
-> Os dois podem ser abas/janelas do **PowerShell no host** (ou no
-> devcontainer — `kubectl` funciona nos dois). Abra os dois **antes** de
-> começar.
+> Os dois podem ser abas/janelas do **host** ou do **devcontainer** —
+> `kubectl` funciona nos dois. Abra os dois **antes** de começar.
 
 **Terminal 1 — seguir os logs dos 2 Pods (deixe rodando):**
 
-```powershell
+`kubectl` é idêntico em PowerShell e bash:
+
+```bash
 # --prefix  -> carimba [pod/api-xxxx/api] em cada linha (mostra QUAL Pod)
 # --tail=0  -> ignora o histórico; só mostra linhas NOVAS a partir de agora
 # -f        -> "follow": fica preso seguindo (não retorna sozinho)
@@ -251,6 +319,7 @@ Deixe-o aberto.
 
 **Terminal 2 — disparar 20 requisições, uma por vez:**
 
+**PowerShell:**
 ```powershell
 foreach ($i in 1..20) {
   curl.exe -s http://localhost:30080/tasks | Out-Null
@@ -258,10 +327,17 @@ foreach ($i in 1..20) {
 }
 ```
 
-> 💡 `curl.exe` (com `.exe`) e **não** `curl` — no PowerShell, `curl` é
-> apelido de `Invoke-WebRequest`, que tem outra sintaxe. O `.exe` força o
-> curl de verdade. `Out-Null` joga fora o corpo da resposta (só queremos
-> gerar tráfego).
+**Linux/macOS (bash):**
+```bash
+for i in $(seq 1 20); do
+  curl -s http://localhost:30080/tasks > /dev/null
+  sleep 0.2
+done
+```
+
+> 💡 No PowerShell, `curl.exe` (com `.exe`) — `curl` puro é apelido de
+> `Invoke-WebRequest`. `Out-Null` (PS) e `> /dev/null` (bash) descartam o
+> corpo da resposta: só queremos gerar tráfego.
 
 ### O que observar
 
@@ -281,9 +357,9 @@ balanceando**. `Ctrl+C` no Terminal 1 para sair.
 > ⚠️ **Não viu alternar?** O `Service`/`kube-proxy` balanceia **por
 > conexão**. Cada `curl.exe` abre uma conexão nova, então deveria revezar —
 > mas a distribuição é aleatória, não um-a-um perfeito. Dispare **mais**
-> requisições (suba o `1..20` para `1..50`) e você verá os dois Pods
-> aparecerem. Se **só um** Pod aparecer sempre, confira que há 2 Pods
-> `Running`: `kubectl get pods -n cloudtask`.
+> requisições (PowerShell: troque `1..20` por `1..50`; bash: `seq 1 50`) e
+> você verá os dois Pods aparecerem. Se **só um** Pod aparecer sempre,
+> confira que há 2 Pods `Running`: `kubectl get pods -n cloudtask`.
 
 ---
 
@@ -312,6 +388,34 @@ Você verá novos Pods subindo **enquanto os antigos ainda servem**
 > internalizar: **independente de Fargate, Kind, EKS — Postgres em
 > container sem volume persistente sempre perde dados**.
 
+**PowerShell:**
+```powershell
+# 1. Contar tarefas atuais
+(curl.exe -s http://localhost:30080/tasks | ConvertFrom-Json).Count
+# (>= 1, do passo 6)
+
+# 2. Forçar deleção do Pod do Postgres
+kubectl delete pod -n cloudtask -l app=postgres
+
+# 3. Aguardar o Deployment recriar o Postgres (banco VAZIO, sem tabelas)
+kubectl wait -n cloudtask --for=condition=ready pod -l app=postgres --timeout=60s
+
+# 4. Tentar listar de novo -> ERRO 500 (nao e "0"!)
+#    O banco novo nao tem a tabela `tasks`. A API so cria o schema no
+#    startup (create_all no lifespan), entao a query quebra.
+curl.exe -s http://localhost:30080/tasks
+# Internal Server Error   <- texto puro; o app QUEBROU, nao so perdeu dados
+
+# 5. Reiniciar a API p/ recriar o schema (o lifespan roda create_all de novo)
+kubectl rollout restart deployment/api -n cloudtask
+kubectl rollout status  deployment/api -n cloudtask
+
+# 6. Agora sim conta -> 0 (tabela recriada, porem VAZIA: dados perdidos)
+(curl.exe -s http://localhost:30080/tasks | ConvertFrom-Json).Count
+# 0  <- dados sumiram
+```
+
+**Linux/macOS (bash):**
 ```bash
 # 1. Listar tarefas atuais
 curl -s http://localhost:30080/tasks | jq 'length'
@@ -320,22 +424,47 @@ curl -s http://localhost:30080/tasks | jq 'length'
 # 2. Forçar deleção do Pod do Postgres
 kubectl delete pod -n cloudtask -l app=postgres
 
-# 3. Aguardar o Deployment recriar
+# 3. Aguardar o Deployment recriar o Postgres (banco VAZIO, sem tabelas)
 kubectl wait -n cloudtask --for=condition=ready pod -l app=postgres --timeout=60s
 
-# 4. Listar tarefas de novo
+# 4. Tentar listar de novo -> ERRO 500 (nao e "0"!)
+#    O banco novo nao tem a tabela `tasks`. A API so cria o schema no
+#    startup (create_all no lifespan), entao a query quebra.
+curl -s http://localhost:30080/tasks
+# Internal Server Error   <- texto puro; o app QUEBROU, nao so perdeu dados
+
+# 5. Reiniciar a API p/ recriar o schema (o lifespan roda create_all de novo)
+kubectl rollout restart deployment/api -n cloudtask
+kubectl rollout status  deployment/api -n cloudtask
+
+# 6. Agora sim conta -> 0 (tabela recriada, porem VAZIA: dados perdidos)
 curl -s http://localhost:30080/tasks | jq 'length'
-# 0  ← dados sumiram
+# 0  <- dados sumiram
 ```
+
+> 💡 Para contar itens do JSON: bash usa `jq 'length'` (instale o `jq` se
+> faltar); PowerShell usa `ConvertFrom-Json` nativo + `.Count`, sem
+> instalar nada.
+
+> ⚠️ **Por que o passo 4 dá 500 e não "0"?** Quando o Postgres volta com o
+> volume vazio, **nem as tabelas existem** — não é só "perdeu as linhas".
+> A CloudTask cria o schema **uma vez, no startup** (`Base.metadata.create_all`
+> no `lifespan` — ver `app/main.py`), e **não** a cada requisição. Como os
+> Pods da API continuaram vivos (não reiniciaram), eles nunca recriaram a
+> tabela `tasks` → a query `SELECT ... FROM tasks` falha com
+> `relation "tasks" does not exist` → HTTP 500. O passo 5 reinicia a API,
+> o `lifespan` roda de novo, recria a tabela (vazia) e o `/tasks` volta a
+> responder — agora com **0** itens.
 
 **Por que aconteceu:**
 
 - O Pod do Postgres usa `emptyDir` para `/var/lib/postgresql/data`.
 - `emptyDir` vive **enquanto o Pod vive**. Pod novo → `emptyDir` novo →
-  banco vazio.
-- A API, por sua vez, sobreviveu: roda em **2 réplicas** sem estado, então
-  matar 1 Pod não derruba o serviço (HA de API funciona). O problema é só
-  no estado (Postgres).
+  banco vazio (sem dados **e sem tabelas**).
+- A API **não morreu** (roda em 2 réplicas sem estado), mas ficou
+  **quebrada** até reiniciar, porque o schema só nasce no startup. Lição
+  dupla: container de estado sem volume perde **tudo**, e o app pode
+  depender de uma inicialização que não acontece sozinha de novo.
 
 **Saída real:**
 
