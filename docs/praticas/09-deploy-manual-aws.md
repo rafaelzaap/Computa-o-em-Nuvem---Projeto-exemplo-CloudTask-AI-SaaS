@@ -100,7 +100,7 @@ didático para **ver o pipeline acontecer dentro da AWS**.
 > Limite Learner Lab: o CodeBuild **roda**, mas a role `voclabs` **não
 > autoriza** `codebuild:ImportSourceCredentials` (conectar GitHub privado)
 > nem webhooks. No Academy a fonte do build vem de um **zip no S3**
-> ([§2.2-Academy](#22-academy--fonte-do-build-via-s3-sem-github)) e o build
+> ([§2.3-Academy](#23-academy--fonte-do-build-via-s3-sem-github)) e o build
 > é disparado **on-demand** (manual).
 
 ### Passos
@@ -151,7 +151,7 @@ Commitar e empurrar.
 >
 > Não há como liberar essa permissão no Academy (IAM travado). **Se você
 > está no Learner Lab, pule este comando** e use a alternativa via S3 logo
-> abaixo ([§2.2-Academy](#22-academy--fonte-do-build-via-s3-sem-github)).
+> abaixo ([§2.3-Academy](#23-academy--fonte-do-build-via-s3-sem-github)).
 
 Em **conta própria**:
 
@@ -215,24 +215,132 @@ No projeto do CodeBuild (passo 2.4), em vez de **Source: GitHub**, escolha
 
 #### 2.4. Criar o projeto CodeBuild
 
-Via Console (Learner Lab não autoriza tudo via CLI):
+> 🟢 **AWS Academy (Learner Lab):** crie pelo **Console** (caminho A) — a
+> role `voclabs` não autoriza tudo via CLI (criar role IAM, webhook etc.).
+>
+> 🔵 **Conta AWS própria:** dá para criar **tudo via CLI** (caminho B):
+> role IAM + projeto + webhook de `git push`.
+
+**A) Via Console (Academy e conta própria):**
 
 1. Console → CodeBuild → Create build project.
 2. **Source:** GitHub → seu repo → branch `semana-04-eks-aws`.
    - **No Academy:** escolha **Amazon S3** → `s3://cloudtask-src-<ACCOUNT_ID>/source.zip`
-     (ver [§2.2-Academy](#22-academy--fonte-do-build-via-s3-sem-github)).
+     (ver [§2.3-Academy](#23-academy--fonte-do-build-via-s3-sem-github)).
 3. **Environment:**
    - Managed image, Ubuntu, Standard 7.0.
    - Privileged: **ON** (necessário para `docker build`).
-   - Service role: **LabRole** (única disponível).
+   - Service role: **LabRole** (única disponível no Academy).
 4. **Buildspec:** Use a buildspec file → `buildspec.yml`.
 5. **Env vars:**
    - `AWS_REGION` = `us-east-1`
    - `ECR_REPO_URI` = (preencher depois de criar repo na §3)
 6. Create build project → Start build (manual).
 
-**Resultado:** CodeBuild puxa o código do GitHub, faz `docker build`, e dá
-push pro ECR.
+**B) Via CLI (apenas conta AWS PRÓPRIA):**
+
+Pré-req: token GitHub já importado na §2.3 — é com essa credencial que o
+CodeBuild clona o repo.
+
+**Linux/macOS (bash):**
+```bash
+# 0. ACCOUNT_ID (se ainda não exportou nesta sessão)
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# 1. criar a role IAM que o CodeBuild assume (na conta própria não existe
+#    LabRole — você cria a sua; trust policy = "CodeBuild pode me assumir")
+aws iam create-role \
+  --role-name codebuild-cloudtask-role \
+  --assume-role-policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Principal": { "Service": "codebuild.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    }]
+  }'
+
+# 2. permissões do build: escrever logs no CloudWatch + dar push no ECR.
+#    Policies gerenciadas para simplificar a aula; em produção, aperte
+#    para o repositório/log group específicos.
+aws iam attach-role-policy --role-name codebuild-cloudtask-role \
+  --policy-arn arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+aws iam attach-role-policy --role-name codebuild-cloudtask-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+
+# 3. criar o projeto apontando direto para o GitHub
+#    (troque SEU_USUARIO/SEU_REPO; privilegedMode=true libera docker build)
+aws codebuild create-project \
+  --name cloudtask-api \
+  --source "type=GITHUB,location=https://github.com/SEU_USUARIO/SEU_REPO.git,buildspec=buildspec.yml" \
+  --source-version semana-04-eks-aws \
+  --artifacts type=NO_ARTIFACTS \
+  --environment "type=LINUX_CONTAINER,image=aws/codebuild/standard:7.0,computeType=BUILD_GENERAL1_SMALL,privilegedMode=true,environmentVariables=[{name=AWS_REGION,value=us-east-1},{name=ECR_REPO_URI,value=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api}]" \
+  --service-role arn:aws:iam::$ACCOUNT_ID:role/codebuild-cloudtask-role
+
+# 4. (opcional) webhook: dispara build automático a cada git push na branch
+aws codebuild create-webhook \
+  --project-name cloudtask-api \
+  --filter-groups '[[{"type":"EVENT","pattern":"PUSH"},{"type":"HEAD_REF","pattern":"^refs/heads/semana-04-eks-aws$"}]]'
+```
+
+**Windows (PowerShell):**
+```powershell
+# 0. ACCOUNT_ID (se ainda não exportou nesta sessão)
+$env:ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+
+# 1. criar a role IAM que o CodeBuild assume (na conta própria não existe
+#    LabRole — você cria a sua). Here-string @'...'@ preserva o JSON.
+$trust = @'
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "Service": "codebuild.amazonaws.com" },
+    "Action": "sts:AssumeRole"
+  }]
+}
+'@
+aws iam create-role `
+  --role-name codebuild-cloudtask-role `
+  --assume-role-policy-document $trust
+
+# 2. permissões do build: logs no CloudWatch + push no ECR
+aws iam attach-role-policy --role-name codebuild-cloudtask-role `
+  --policy-arn arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+aws iam attach-role-policy --role-name codebuild-cloudtask-role `
+  --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+
+# 3. criar o projeto apontando direto para o GitHub
+#    (troque SEU_USUARIO/SEU_REPO; privilegedMode=true libera docker build)
+aws codebuild create-project `
+  --name cloudtask-api `
+  --source "type=GITHUB,location=https://github.com/SEU_USUARIO/SEU_REPO.git,buildspec=buildspec.yml" `
+  --source-version semana-04-eks-aws `
+  --artifacts type=NO_ARTIFACTS `
+  --environment "type=LINUX_CONTAINER,image=aws/codebuild/standard:7.0,computeType=BUILD_GENERAL1_SMALL,privilegedMode=true,environmentVariables=[{name=AWS_REGION,value=us-east-1},{name=ECR_REPO_URI,value=${env:ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api}]" `
+  --service-role "arn:aws:iam::${env:ACCOUNT_ID}:role/codebuild-cloudtask-role"
+
+# 4. (opcional) webhook: dispara build automático a cada git push na branch
+$filters = @'
+[[{"type":"EVENT","pattern":"PUSH"},{"type":"HEAD_REF","pattern":"^refs/heads/semana-04-eks-aws$"}]]
+'@
+aws codebuild create-webhook `
+  --project-name cloudtask-api `
+  --filter-groups $filters
+```
+
+> 💡 A env var `ECR_REPO_URI` já aponta para o repositório da §3 — **crie o
+> repo ECR ([§3.1](#31-criar-o-repositório-ecr--descobrir-o-acct)) antes do
+> primeiro build**, senão o `docker push` falha.
+>
+> 💡 O webhook (passo 4) é o que transforma o build manual em **CI de
+> verdade**: cada `git push` na branch dispara o pipeline sozinho. No
+> Academy ele não existe (sem credencial GitHub) — lá o "git push" é o
+> re-zip + `aws s3 cp` da [§2.3-Academy](#23-academy--fonte-do-build-via-s3-sem-github).
+
+**Resultado:** CodeBuild puxa o código (GitHub ou zip no S3), faz
+`docker build`, e dá push pro ECR.
 
 ---
 
@@ -293,8 +401,8 @@ aws ecr list-images --repository-name cloudtask-api
 ### 3.3. Caminho B — build via CodeBuild (push automático)
 
 Reaproveita o projeto criado na §2 — com fonte **GitHub** (conta própria)
-ou fonte **S3** (Academy, [§2.2-Academy](#22-academy--fonte-do-build-via-s3-sem-github)).
-O `buildspec.yml` (§2.3) faz login, build `target prod`, tag e push; o
+ou fonte **S3** (Academy, [§2.3-Academy](#23-academy--fonte-do-build-via-s3-sem-github)).
+O `buildspec.yml` (§2.1) faz login, build `target prod`, tag e push; o
 CodeBuild executa tudo na nuvem.
 
 **Linux/macOS (bash):**

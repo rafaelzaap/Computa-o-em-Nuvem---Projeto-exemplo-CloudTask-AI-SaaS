@@ -1,0 +1,19 @@
+# buildspec.yml — usado pelo CodeBuild
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - echo "Login no ECR..."
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPO_URI
+      - IMAGE_TAG=v$(date +%Y%m%d-%H%M%S)
+  build:
+    commands:
+      - echo "Build da imagem (target prod)..."
+      - docker build --target prod -t cloudtask-api:$IMAGE_TAG .
+      - docker tag cloudtask-api:$IMAGE_TAG $ECR_REPO_URI:$IMAGE_TAG
+      - docker tag cloudtask-api:$IMAGE_TAG $ECR_REPO_URI:latest
+  post_build:
+    commands:
+      - echo "Push para ECR..."
+      - docker push $ECR_REPO_URI:$IMAGE_TAG
+      - docker push $ECR_REPO_URI:latest
