@@ -661,6 +661,14 @@ export VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true \
   --query 'Vpcs[0].VpcId' --output text)
 export SUBNET_ID=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC_ID \
   --query 'Subnets[0].SubnetId' --output text)
+# VPC default sem subnets (conta "limpa")? recria uma subnet default.
+# Sem isso, create-service falha com "Subnet ID must match subnet-...".
+if [ -z "$SUBNET_ID" ] || [ "$SUBNET_ID" = "None" ]; then
+  aws ec2 create-default-subnet --availability-zone us-east-1a >/dev/null
+  export SUBNET_ID=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC_ID \
+    --query 'Subnets[0].SubnetId' --output text)
+fi
+echo "SUBNET_ID=$SUBNET_ID"
 # cria o SG; se ja existir (re-run), reaproveita o ID existente.
 # Atribui SEM export (export sempre retorna 0 e mascararia a falha do $(...)).
 SG_ID=$(aws ec2 create-security-group --group-name cloudtask-fargate-sg \
@@ -735,6 +743,14 @@ $env:VPC_ID = aws ec2 describe-vpcs --filters Name=isDefault,Values=true `
   --query 'Vpcs[0].VpcId' --output text
 $env:SUBNET_ID = aws ec2 describe-subnets --filters Name=vpc-id,Values=$env:VPC_ID `
   --query 'Subnets[0].SubnetId' --output text
+# VPC default sem subnets (conta "limpa")? recria uma subnet default.
+# Sem isso, create-service falha com "Subnet ID must match subnet-...".
+if (-not $env:SUBNET_ID -or $env:SUBNET_ID -eq 'None') {
+  aws ec2 create-default-subnet --availability-zone us-east-1a | Out-Null
+  $env:SUBNET_ID = aws ec2 describe-subnets --filters Name=vpc-id,Values=$env:VPC_ID `
+    --query 'Subnets[0].SubnetId' --output text
+}
+echo "SUBNET_ID=$env:SUBNET_ID"
 # cria o SG; se ja existir (re-run), reaproveita o ID existente
 $env:SG_ID = aws ec2 create-security-group --group-name cloudtask-fargate-sg `
   --description "ECS Fargate 8000" --vpc-id $env:VPC_ID --query 'GroupId' --output text 2>$null
