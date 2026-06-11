@@ -100,7 +100,7 @@ didático para **ver o pipeline acontecer dentro da AWS**.
 > Limite Learner Lab: o CodeBuild **roda**, mas a role `voclabs` **não
 > autoriza** `codebuild:ImportSourceCredentials` (conectar GitHub privado)
 > nem webhooks. No Academy a fonte do build vem de um **zip no S3**
-> ([§2.3-Academy](#23-academy--fonte-do-build-via-s3-sem-github)) e o build
+> ([§2.3-AWS_ACADEMY](#23-aws_academy--fonte-do-build-via-s3-sem-github)) e o build
 > é disparado **on-demand** (manual).
 
 ### Passos
@@ -151,7 +151,7 @@ Commitar e empurrar.
 2. Permissões mínimas: `repo` (público) ou `repo` + `read:org` (privado).
 3. Copie o token (`ghp_...`).
 
-#### 2.3. Conectar o GitHub no CodeBuild via CLI (conta AWS PRÓPRIA)
+#### 2.3-AWS_PROPRIA — Conectar o GitHub no CodeBuild via CLI
 
 > ⚠️ **Este comando só funciona em conta AWS própria/privada** (com IAM
 > amplo). **No AWS Academy / Learner Lab ele FALHA** — a role `voclabs` não
@@ -165,7 +165,7 @@ Commitar e empurrar.
 >
 > Não há como liberar essa permissão no Academy (IAM travado). **Se você
 > está no Learner Lab, pule este comando** e use a alternativa via S3 logo
-> abaixo ([§2.3-Academy](#23-academy--fonte-do-build-via-s3-sem-github)).
+> abaixo ([§2.3-AWS_ACADEMY](#23-aws_academy--fonte-do-build-via-s3-sem-github)).
 
 Em **conta própria**:
 
@@ -176,7 +176,7 @@ aws codebuild import-source-credentials \
   --token "ghp_SEU_TOKEN_AQUI"
 ```
 
-#### 2.3-Academy — Fonte do build via S3 (sem GitHub)
+#### 2.3-AWS_ACADEMY — Fonte do build via S3 (sem GitHub)
 
 No Learner Lab o CodeBuild não consegue clonar o GitHub (sem
 `ImportSourceCredentials`). Solução permitida pela role `voclabs`:
@@ -240,7 +240,7 @@ No projeto do CodeBuild (passo 2.4), em vez de **Source: GitHub**, escolha
 1. Console → CodeBuild → Create build project.
 2. **Source:** GitHub → seu repo → branch `semana-04-eks-aws`.
    - **No Academy:** escolha **Amazon S3** → `s3://cloudtask-src-<ACCOUNT_ID>/source.zip`
-     (ver [§2.3-Academy](#23-academy--fonte-do-build-via-s3-sem-github)).
+     (ver [§2.3-AWS_ACADEMY](#23-aws_academy--fonte-do-build-via-s3-sem-github)).
 3. **Environment:**
    - Managed image, Ubuntu, Standard 7.0.
    - Privileged: **ON** (necessário para `docker build`).
@@ -253,7 +253,7 @@ No projeto do CodeBuild (passo 2.4), em vez de **Source: GitHub**, escolha
 
 **B) Via CLI (apenas conta AWS PRÓPRIA):**
 
-Pré-req: token GitHub já importado na §2.3 — é com essa credencial que o
+Pré-req: token GitHub já importado na §2.3-AWS_PROPRIA — é com essa credencial que o
 CodeBuild clona o repo.
 
 **Linux/macOS (bash):**
@@ -360,7 +360,7 @@ aws codebuild create-webhook `
 > 💡 O webhook (passo 4) é o que transforma o build manual em **CI de
 > verdade**: cada `git push` na branch dispara o pipeline sozinho. No
 > Academy ele não existe (sem credencial GitHub) — lá o "git push" é o
-> re-zip + `aws s3 cp` da [§2.3-Academy](#23-academy--fonte-do-build-via-s3-sem-github).
+> re-zip + `aws s3 cp` da [§2.3-AWS_ACADEMY](#23-aws_academy--fonte-do-build-via-s3-sem-github).
 
 **Resultado:** CodeBuild puxa o código (GitHub ou zip no S3), faz
 `docker build`, e dá push pro ECR.
@@ -375,11 +375,21 @@ aws codebuild create-webhook `
 >
 > Os dois precisam do **repositório ECR criado** primeiro (3.1).
 
+> ⚠️ **Não confunda os dois eixos:**
+> - **Caminho A vs B** = *onde* o build roda (sua máquina vs nuvem/CodeBuild).
+> - **Conta própria vs Academy** = *qual* conta AWS (IAM amplo vs `voclabs`).
+>
+> São independentes. O **Caminho A** é **igual** nas duas contas (build é
+> local). O **Caminho B** é o único que diverge — a **fonte** do build muda:
+> GitHub (própria) ou zip no S3 (Academy) — daí o split `3.3-AWS_PROPRIA` /
+> `3.3-AWS_ACADEMY`.
+
 ### 3.1. Criar o repositório ECR + descobrir o `<acct>`
 
 O `<acct>` é o **ID numérico da conta** (12 dígitos) e aparece em **toda
 URI do ECR**. Pegue-o por CLI — vale para conta própria **e** Learner Lab:
 
+**Linux/macOS (bash):**
 ```bash
 # ID da conta (12 dígitos) — é o <acct> das URIs
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -395,11 +405,33 @@ export ECR=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api
 echo "ECR URI: $ECR"
 ```
 
+**Windows (PowerShell):**
+```powershell
+# ID da conta (12 digitos) — e o <acct> das URIs
+$env:ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+echo "Account: $env:ACCOUNT_ID"
+
+# criar o repositorio. Se ja existir, o aws sai com erro, mas o exit code
+# de um .exe nao interrompe o PowerShell; 2>$null só esconde a mensagem.
+aws ecr create-repository `
+  --repository-name cloudtask-api `
+  --region us-east-1 2>$null
+
+# montar a URI completa do repositorio
+$env:ECR = "$env:ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api"
+echo "ECR URI: $env:ECR"
+```
+
 > 💡 Pelo Console o `<acct>` também aparece no **canto superior direito**
 > (Account ID) e na própria URI em **ECR → Repositories**.
 
 ### 3.2. Caminho A — build local + push direto (sem CodeBuild)
 
+> Mesmo procedimento em **conta própria e Academy** — o build roda na **sua
+> máquina** e só o push vai pra nuvem, então não depende de role/CodeBuild.
+> (A diferença conta-própria-vs-Academy aparece no **Caminho B**, §3.3.)
+
+**Linux/macOS (bash/zsh):**
 ```bash
 # 1. login no ECR (usa o $ECR da 3.1)
 aws ecr get-login-password --region us-east-1 \
@@ -408,11 +440,36 @@ aws ecr get-login-password --region us-east-1 \
 # 2. build prod
 docker build --target prod -t cloudtask-api:v0.4.0 .
 
-# 3. tag + push
-docker tag cloudtask-api:v0.4.0 $ECR:v0.4.0
-docker tag cloudtask-api:v0.4.0 $ECR:latest
-docker push $ECR:v0.4.0
-docker push $ECR:latest
+# 3. tag + push — SEMPRE use ${ECR}:tag com chaves (ver nota abaixo)
+docker tag cloudtask-api:v0.4.0 ${ECR}:v0.4.0
+docker tag cloudtask-api:v0.4.0 ${ECR}:latest
+docker push ${ECR}:v0.4.0
+docker push ${ECR}:latest
+
+# 4. listar
+aws ecr list-images --repository-name cloudtask-api
+```
+
+> ⚠️ **Use `${ECR}:latest`, não `$ECR:latest`.** No **zsh** (shell padrão do
+> macOS), `$ECR:l` é o **modificador `:l`** (lowercase): ele come o `:l` e
+> sobra `atest`, virando `cloudtask-apiatest` → `name unknown: repository
+> does not exist`. As chaves `${ECR}` delimitam o nome da variável e evitam
+> isso. No bash puro não acontece, mas `${ECR}` funciona nos dois.
+
+**Windows (PowerShell):**
+```powershell
+# 1. login no ECR (usa o $env:ECR da 3.1)
+aws ecr get-login-password --region us-east-1 `
+  | docker login --username AWS --password-stdin $env:ECR
+
+# 2. build prod
+docker build --target prod -t cloudtask-api:v0.4.0 .
+
+# 3. tag + push (chaves em ${env:ECR} separam o nome da var do ":tag")
+docker tag cloudtask-api:v0.4.0 "${env:ECR}:v0.4.0"
+docker tag cloudtask-api:v0.4.0 "${env:ECR}:latest"
+docker push "${env:ECR}:v0.4.0"
+docker push "${env:ECR}:latest"
 
 # 4. listar
 aws ecr list-images --repository-name cloudtask-api
@@ -423,60 +480,100 @@ aws ecr list-images --repository-name cloudtask-api
 
 ### 3.3. Caminho B — build via CodeBuild (push automático)
 
-Reaproveita o projeto criado na §2 — com fonte **GitHub** (conta própria)
-ou fonte **S3** (Academy, [§2.3-Academy](#23-academy--fonte-do-build-via-s3-sem-github)).
-O `buildspec.yml` (§2.1) faz login, build `target prod`, tag e push; o
-CodeBuild executa tudo na nuvem.
+Reaproveita o projeto da §2 e o `buildspec.yml` (§2.1: login, build `target
+prod`, tag e push) — o CodeBuild executa tudo na nuvem. A **única** diferença
+entre as contas é a **fonte** do build: GitHub (própria) ou zip no S3
+(Academy). Por isso este caminho se divide em dois abaixo.
+
+#### 3.3-AWS_PROPRIA — fonte GitHub
+
+A fonte já é o GitHub (configurada na §2.4). Cada `git push` na branch já
+dispara o build pelo **webhook** (§2.4); para disparar **manualmente**:
 
 **Linux/macOS (bash):**
 ```bash
-# 2. (Academy) reempacotar o codigo e subir ao S3 antes de cada build
-zip -r /tmp/source.zip . -x '.git/*' '*/__pycache__/*' '*.pyc'
-aws s3 cp /tmp/source.zip s3://cloudtask-src-$ACCOUNT_ID/source.zip
-
-# 3. disparar o build pela CLI (use o NOME do projeto que voce criou na 2.4)
+# 1. disparar o build (use o NOME do projeto criado na 2.4)
 export BUILD_ID=$(aws codebuild start-build \
   --project-name cloudtask-api \
   --query 'build.id' --output text)
 echo "Build: $BUILD_ID"
 
-# 4. acompanhar o status (repita ate SUCCEEDED; ~2-4 min)
+# 2. acompanhar o status (repita ate SUCCEEDED; ~2-4 min)
 aws codebuild batch-get-builds --ids $BUILD_ID \
   --query 'builds[0].buildStatus' --output text
 # IN_PROGRESS -> SUCCEEDED
 
-# 5. confirmar a imagem no ECR
+# 3. confirmar a imagem no ECR
 aws ecr list-images --repository-name cloudtask-api
 ```
 
 **Windows (PowerShell):**
 ```powershell
-# 2. (Academy) reempacotar o codigo e subir ao S3 antes de cada build
-Compress-Archive -Path * -DestinationPath "$env:TEMP\source.zip" -Force
-aws s3 cp "$env:TEMP\source.zip" "s3://cloudtask-src-$env:ACCOUNT_ID/source.zip"
-
-# 3. disparar o build pela CLI (use o NOME do projeto que voce criou na 2.4)
+# 1. disparar o build (use o NOME do projeto criado na 2.4)
 $env:BUILD_ID = aws codebuild start-build `
   --project-name cloudtask-api `
   --query 'build.id' --output text
 echo "Build: $env:BUILD_ID"
 
-# 4. acompanhar o status (repita ate SUCCEEDED; ~2-4 min)
+# 2. acompanhar o status (repita ate SUCCEEDED; ~2-4 min)
 aws codebuild batch-get-builds --ids $env:BUILD_ID `
   --query 'builds[0].buildStatus' --output text
 # IN_PROGRESS -> SUCCEEDED
 
-# 5. confirmar a imagem no ECR
+# 3. confirmar a imagem no ECR
 aws ecr list-images --repository-name cloudtask-api
 ```
 
-> 💡 A env var `ECR_REPO_URI` (do passo 1) é configurada no Console do
-> CodeBuild (projeto → Edit → Environment → Env vars), não no shell:
-> `ECR_REPO_URI = <acct>.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api`.
+#### 3.3-AWS_ACADEMY — fonte zip → S3
+
+Sem credencial GitHub, a fonte é um **zip no S3**
+([§2.3-AWS_ACADEMY](#23-aws_academy--fonte-do-build-via-s3-sem-github)).
+Reempacote e suba o código **antes de cada build** — é o "git push" manual
+do Academy.
+
+**Linux/macOS (bash):**
+```bash
+# 1. reempacotar o codigo e subir ao S3
+zip -r /tmp/source.zip . -x '.git/*' '*/__pycache__/*' '*.pyc'
+aws s3 cp /tmp/source.zip s3://cloudtask-src-$ACCOUNT_ID/source.zip
+
+# 2. disparar o build
+export BUILD_ID=$(aws codebuild start-build \
+  --project-name cloudtask-api \
+  --query 'build.id' --output text)
+echo "Build: $BUILD_ID"
+
+# 3. acompanhar o status + confirmar a imagem
+aws codebuild batch-get-builds --ids $BUILD_ID \
+  --query 'builds[0].buildStatus' --output text
+aws ecr list-images --repository-name cloudtask-api
+```
+
+**Windows (PowerShell):**
+```powershell
+# 1. reempacotar o codigo e subir ao S3
+Compress-Archive -Path * -DestinationPath "$env:TEMP\source.zip" -Force
+aws s3 cp "$env:TEMP\source.zip" "s3://cloudtask-src-$env:ACCOUNT_ID/source.zip"
+
+# 2. disparar o build
+$env:BUILD_ID = aws codebuild start-build `
+  --project-name cloudtask-api `
+  --query 'build.id' --output text
+echo "Build: $env:BUILD_ID"
+
+# 3. acompanhar o status + confirmar a imagem
+aws codebuild batch-get-builds --ids $env:BUILD_ID `
+  --query 'builds[0].buildStatus' --output text
+aws ecr list-images --repository-name cloudtask-api
+```
 
 > 💡 Se `start-build` falhar por permissão no Academy, dispare pelo Console
-> (CodeBuild → projeto → **Start build**). O acompanhamento por CLI (passo
-> 4) continua valendo.
+> (CodeBuild → projeto → **Start build**). O acompanhamento por CLI continua
+> valendo.
+
+> 💡 A env var `ECR_REPO_URI` é configurada no Console do CodeBuild
+> (projeto → Edit → Environment → Env vars), não no shell:
+> `ECR_REPO_URI = <acct>.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api`.
 
 **Cleanup do ECR:** seção [§11](#11-sempre--cleanup-obrigatorio).
 
