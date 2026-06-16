@@ -46,6 +46,30 @@ class HealthResponse(BaseModel):
     )
 
 
+class ReadyResponse(BaseModel):
+    """Resposta do endpoint de readiness da aplicação."""
+
+    status: Literal["ready", "not_ready"] = Field(
+        ...,
+        description="`ready` indica que dependências críticas responderam.",
+        examples=["ready"],
+    )
+    db: Literal["ok", "down"] = Field(
+        ...,
+        description="Estado da conexão com PostgreSQL.",
+        examples=["ok"],
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"status": "ready", "db": "ok"},
+                {"status": "not_ready", "db": "down"},
+            ]
+        }
+    )
+
+
 class RootResponse(BaseModel):
     """Resposta do endpoint raiz :func:`app.main.root`.
 

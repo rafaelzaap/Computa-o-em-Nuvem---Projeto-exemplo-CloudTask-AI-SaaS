@@ -7,18 +7,16 @@ In Aula 4 this will move to a dedicated settings object based on `.env`.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://cloudtask:cloudtask@db:5432/cloudtask",
-)
+from app.core.config import get_settings
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+settings = get_settings()
+
+engine = create_engine(settings.database_url, pool_pre_ping=True)
 
 SessionLocal = sessionmaker(
     autocommit=False,
@@ -38,4 +36,3 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-

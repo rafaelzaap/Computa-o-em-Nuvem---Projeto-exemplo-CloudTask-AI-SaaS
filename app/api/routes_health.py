@@ -6,16 +6,18 @@ Endpoints leves usados por:
 * ``readinessProbe`` / ``livenessProbe`` do Kubernetes (Aulas 6 e 8).
 * Load Balancers (ELB/ALB/NLB) na frente do EKS (Aula 8).
 
-Não dependem de banco nem de serviços externos — manter assim. Em aulas
-futuras (Aula 3+) introduziremos um ``/health/ready`` separado que
-verifica conexão com PostgreSQL/RDS, S3, etc.
+O ``/health`` não depende de banco nem de serviços externos — manter assim.
+O ``/health/ready`` verifica conexão com PostgreSQL para readiness.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, status
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
-from app.schemas import HealthResponse
+from app.db.database import SessionLocal
+from app.schemas import HealthResponse, ReadyResponse
 
 router = APIRouter(tags=["health"])
 
@@ -36,8 +38,8 @@ por dia** sem custo perceptível.
 | AWS ELB/ALB | Target Group Health Check Path = `/health` |
 
 > <kbd>Importante</kbd> — esta rota **não** valida banco ou serviços
-> externos. Para um check "está pronto para receber tráfego?", aguarde o
-> endpoint `GET /health/ready` que será adicionado na Aula 3.
+> externos. Para um check "está pronto para receber tráfego?", use
+> `GET /health/ready`, que valida a conexão com PostgreSQL.
 
 ### Exemplos de uso
 
@@ -71,6 +73,25 @@ livenessProbe:
 """
 
 
+READY_DESCRIPTION = """\
+Indica se a API está **pronta para receber tráfego**.
+
+Este endpoint faz uma consulta mínima (`SELECT 1`) no PostgreSQL. Ele é mais
+pesado que `/health`, então deve ser usado como **readiness probe**, não como
+liveness probe.
+
+### Por que separar?
+
+| Endpoint | O que responde | Uso correto |
+| --- | --- | --- |
+| `/health` | Processo HTTP vivo | Reiniciar container travado |
+| `/health/ready` | Banco respondendo | Enviar ou segurar tráfego |
+
+Se o banco cair, o processo da API pode continuar vivo. Nesse caso `/health`
+continua 200, mas `/health/ready` retorna 503 para avisar o orquestrador.
+"""
+
+
 @router.get(
     "/health",
     response_model=HealthResponse,
@@ -101,3 +122,35 @@ def health() -> HealthResponse:
         'ok'
     """
     return HealthResponse(status="ok")
+
+
+@router.get(
+    "/health/ready",
+    response_model=ReadyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Readiness probe com PostgreSQL",
+    description=READY_DESCRIPTION,
+    response_description="Estado da prontidão da API.",
+    responses={
+        200: {
+            "description": "Aplicação pronta para receber tráfego.",
+            "content": {"application/json": {"example": {"status": "ready", "db": "ok"}}},
+        },
+        503: {
+            "description": "Aplicação viva, mas ainda sem dependências críticas.",
+            "content": {"application/json": {"example": {"status": "not_ready", "db": "down"}}},
+        },
+    },
+)
+def readiness() -> ReadyResponse | JSONResponse:
+    """Check whether PostgreSQL is reachable."""
+    try:
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+    except Exception:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=ReadyResponse(status="not_ready", db="down").model_dump(),
+        )
+
+    return ReadyResponse(status="ready", db="ok")

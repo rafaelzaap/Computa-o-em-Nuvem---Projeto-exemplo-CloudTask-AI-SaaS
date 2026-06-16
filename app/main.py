@@ -30,12 +30,16 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Request, Response, status
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
 from app.api import routes_health, routes_tasks
+from app.core.config import get_settings
 from app.db.database import Base, engine
 from app.schemas import RootResponse
+
+settings = get_settings()
 
 
 @asynccontextmanager
@@ -52,8 +56,8 @@ APP_DESCRIPTION = """\
 Mini **SaaS de gerenciamento de tarefas** construído ao longo da disciplina
 **Computação em Nuvem** (N-CPU / UNINTER).
 
-Esta é a versão da **Semana 2** (versão `0.2.0`): FastAPI mínimo, Docker,
-PostgreSQL e CRUD completo de tarefas.
+Esta é a versão da **Semana 2** (versão `0.2.0`): FastAPI, Docker,
+PostgreSQL, CRUD de tarefas, configuração por ambiente e readiness check.
 
 ### Status do projeto
 
@@ -76,7 +80,7 @@ PostgreSQL e CRUD completo de tarefas.
 
 ### Links úteis
 
-- [Issue mais recente (Aula 3)](https://github.com/N-CPUninter/Computa-o-em-Nuvem---Projeto-exemplo-CloudTask-AI-SaaS/issues/3)
+- [Issue mais recente (Aula 4)](https://github.com/N-CPUninter/Computa-o-em-Nuvem---Projeto-exemplo-CloudTask-AI-SaaS/issues/4)
 - [Roadmap completo](https://github.com/N-CPUninter/Computa-o-em-Nuvem---Projeto-exemplo-CloudTask-AI-SaaS/blob/main/docs/ROADMAP.md)
 - [Lista de tarefas (`docs/TAREFAS.md`)](https://github.com/N-CPUninter/Computa-o-em-Nuvem---Projeto-exemplo-CloudTask-AI-SaaS/blob/main/docs/TAREFAS.md)
 
@@ -164,6 +168,23 @@ app = FastAPI(
         },
     ],
 )
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next) -> Response:
+    """Add simple production security headers.
+
+    TLS normally terminates at the edge, such as an ALB with ACM. The app does
+    not redirect HTTP to HTTPS here because internal probes may use HTTP.
+    """
+    response = await call_next(request)
+    if settings.force_https and not settings.is_development:
+        response.headers["Strict-Transport-Security"] = (
+            f"max-age={settings.hsts_max_age_seconds}; includeSubDomains"
+        )
+    return response
 
 # Registra os endpoints do módulo `routes_health` na aplicação.
 app.include_router(routes_health.router)

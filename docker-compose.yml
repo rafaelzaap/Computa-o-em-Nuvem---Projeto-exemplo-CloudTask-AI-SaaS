@@ -40,11 +40,17 @@ services:
       - .:/app:cached
       # Cache do pip do usuário appuser. Sobrevive a `down`.
       - api-pip-cache:/home/appuser/.cache/pip
+    env_file:
+      - path: .env
+        required: false
     environment:
-      APP_ENV: development
-      APP_PORT: "8000"
-      LOG_LEVEL: DEBUG
-      DATABASE_URL: postgresql+psycopg2://cloudtask:cloudtask@db:5432/cloudtask
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: "${APP_PORT:-8000}"
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://cloudtask:cloudtask@db:5432/cloudtask}
+      SECRET_KEY: ${SECRET_KEY:-change-me-please}
+      FORCE_HTTPS: ${FORCE_HTTPS:-false}
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-localhost,127.0.0.1,0.0.0.0,*}
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     depends_on:
@@ -59,9 +65,9 @@ services:
     image: postgres:16-alpine
     container_name: cloudtask-db
     environment:
-      POSTGRES_USER: cloudtask
-      POSTGRES_PASSWORD: cloudtask
-      POSTGRES_DB: cloudtask
+      POSTGRES_USER: ${POSTGRES_USER:-cloudtask}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cloudtask}
+      POSTGRES_DB: ${POSTGRES_DB:-cloudtask}
     ports:
       - "5432:5432"
     volumes:

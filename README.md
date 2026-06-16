@@ -5,9 +5,9 @@
 
 <!-- Título e breve descrição do repositório -->
 <div align="center">
-  <h1>CloudTask AI SaaS — Semana 2 (Aula 3)</h1>
-  <p><b>Base da Semana 1 evoluída com PostgreSQL e CRUD de tarefas.</b></p>
-  <p><b>FastAPI + Docker Compose + PostgreSQL</b>, com persistência via SQLAlchemy.</p>
+  <h1>CloudTask AI SaaS — Semana 2 (Aulas 3 e 4)</h1>
+  <p><b>Base da Semana 1 evoluída com PostgreSQL, CRUD, configuração e segurança.</b></p>
+  <p><b>FastAPI + Docker Compose + PostgreSQL</b>, com persistência via SQLAlchemy e settings por ambiente.</p>
 </div>
 
 <p align="center">
@@ -45,6 +45,15 @@ Esta etapa parte da **Semana 1** e acrescenta a **Aula 3**. Abaixo, o que cada a
 - `app/db/models.py` define o modelo `Task`.
 - `app/db/schemas.py` define os schemas Pydantic de entrada e saída.
 - `app/api/routes_tasks.py` implementa CRUD completo em `/tasks`.
+
+### Aula 4 — Configuração, segurança e readiness
+
+- `app/core/config.py` centraliza variáveis de ambiente com `pydantic-settings`.
+- `GET /health` continua sendo liveness puro, sem tocar no banco.
+- `GET /health/ready` executa `SELECT 1` no PostgreSQL e retorna 503 se o banco cair.
+- `TrustedHostMiddleware` lê `TRUSTED_HOSTS`.
+- HSTS é aplicado apenas fora de desenvolvimento quando `FORCE_HTTPS=true`.
+- Uvicorn sobe com `--proxy-headers`, preparado para ALB/Ingress no futuro.
 
 > **Por que migrar o devcontainer para o compose já na Aula 2?**
 > Na Aula 3 (Semana 2) adicionamos o serviço `db` (PostgreSQL 16, compatível com Amazon RDS) ao mesmo compose. Com a migração feita aqui, **nada muda** no `devcontainer.json` depois — basta editar o compose, e o aluno ganha o banco automaticamente ao reabrir o devcontainer.
@@ -118,6 +127,7 @@ docker run --rm -p 8000:8000 cloudtask-api:prod
 | ------ | ----------------- | -------------------------------------------- |
 | GET    | `/`               | Metadados da aplicação.                      |
 | GET    | `/health`         | Liveness probe (`{"status": "ok"}`).         |
+| GET    | `/health/ready`   | Readiness probe com consulta ao PostgreSQL.  |
 | POST   | `/tasks`          | Cria uma tarefa.                             |
 | GET    | `/tasks`          | Lista tarefas.                               |
 | GET    | `/tasks/{id}`     | Busca uma tarefa.                            |
