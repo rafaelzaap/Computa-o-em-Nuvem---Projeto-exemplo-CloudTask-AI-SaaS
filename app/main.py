@@ -27,11 +27,22 @@ URLs úteis após subir:
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, status
 
 from app import __version__
-from app.api import routes_health
+from app.api import routes_health, routes_tasks
+from app.db.database import Base, engine
 from app.schemas import RootResponse
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Create database tables when the application starts."""
+    Base.metadata.create_all(bind=engine)
+    yield
 
 # ---------------------------------------------------------------------------
 # Texto rico em Markdown exibido na home do Swagger UI.
@@ -41,8 +52,8 @@ APP_DESCRIPTION = """\
 Mini **SaaS de gerenciamento de tarefas** construído ao longo da disciplina
 **Computação em Nuvem** (N-CPU / UNINTER).
 
-Esta é a versão da **Semana 1** (versão `0.1.0`): FastAPI mínimo, Dockerfile
-multi-target, Docker Compose e devcontainer do VS Code.
+Esta é a versão da **Semana 2** (versão `0.2.0`): FastAPI mínimo, Docker,
+PostgreSQL e CRUD completo de tarefas.
 
 ### Status do projeto
 
@@ -51,8 +62,8 @@ multi-target, Docker Compose e devcontainer do VS Code.
 
 | Semana | Branch                          | Tema                                                          |
 | -----: | :------------------------------ | :------------------------------------------------------------ |
-| <kbd>1</kbd> ← *você está aqui* | `semana-01-fastapi-docker`      | FastAPI mínimo, Docker e Docker Compose, devcontainer         |
-|      2 | `semana-02-rds-vpc-seguranca`   | PostgreSQL + CRUD, config `.env`, docs de VPC/IAM             |
+|      1 | `semana-01-fastapi-docker`      | FastAPI mínimo, Docker e Docker Compose, devcontainer         |
+| <kbd>2</kbd> ← *você está aqui* | `semana-02-rds-vpc-seguranca`   | PostgreSQL + CRUD, config `.env`, docs de VPC/IAM             |
 |      3 | `semana-03-s3-kubernetes`       | Upload S3 (com fallback local), Kubernetes local (Kind)       |
 |      4 | `semana-04-eks-aws`             | Build/push para ECR, deploy no EKS                            |
 |      5 | `semana-05-custos-nosql-logs`   | HPA + teste de carga + Cost Explorer, eventos com DynamoDB    |
@@ -65,7 +76,7 @@ multi-target, Docker Compose e devcontainer do VS Code.
 
 ### Links úteis
 
-- [Issue mais recente (Aula 2)](https://github.com/N-CPUninter/Computa-o-em-Nuvem---Projeto-exemplo-CloudTask-AI-SaaS/issues/2)
+- [Issue mais recente (Aula 3)](https://github.com/N-CPUninter/Computa-o-em-Nuvem---Projeto-exemplo-CloudTask-AI-SaaS/issues/3)
 - [Roadmap completo](https://github.com/N-CPUninter/Computa-o-em-Nuvem---Projeto-exemplo-CloudTask-AI-SaaS/blob/main/docs/ROADMAP.md)
 - [Lista de tarefas (`docs/TAREFAS.md`)](https://github.com/N-CPUninter/Computa-o-em-Nuvem---Projeto-exemplo-CloudTask-AI-SaaS/blob/main/docs/TAREFAS.md)
 
@@ -106,7 +117,7 @@ implantada.
 
 ```bash
 curl -s http://localhost:8000/
-# {"name":"CloudTask AI SaaS","version":"0.1.0","docs":"/docs"}
+# {"name":"CloudTask AI SaaS","version":"0.2.0","docs":"/docs"}
 ```
 
 **Python (httpx)**
@@ -132,6 +143,7 @@ app = FastAPI(
     title="CloudTask AI SaaS",
     description=APP_DESCRIPTION,
     version=__version__,
+    lifespan=lifespan,
     contact={
         "name": "Prof. Guilherme Patriota",
         "url": "https://github.com/guipatriota",
@@ -146,11 +158,16 @@ app = FastAPI(
             "name": "health",
             "description": "Endpoints de saúde usados por Docker, Kubernetes e Load Balancers.",
         },
+        {
+            "name": "tasks",
+            "description": "CRUD de tarefas persistidas em PostgreSQL.",
+        },
     ],
 )
 
 # Registra os endpoints do módulo `routes_health` na aplicação.
 app.include_router(routes_health.router)
+app.include_router(routes_tasks.router)
 
 
 @app.get(
@@ -168,7 +185,7 @@ app.include_router(routes_health.router)
                 "application/json": {
                     "example": {
                         "name": "CloudTask AI SaaS",
-                        "version": "0.1.0",
+                        "version": "0.2.0",
                         "docs": "/docs",
                     }
                 }

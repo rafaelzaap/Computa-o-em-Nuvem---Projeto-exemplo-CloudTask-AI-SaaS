@@ -44,11 +44,35 @@ services:
       APP_ENV: development
       APP_PORT: "8000"
       LOG_LEVEL: DEBUG
+      DATABASE_URL: postgresql+psycopg2://cloudtask:cloudtask@db:5432/cloudtask
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
+    depends_on:
+      db:
+        condition: service_healthy
     # Mantém container vivo mesmo após Ctrl+C do uvicorn — facilita o uso
     # como devcontainer, onde o VS Code dispara o uvicorn manualmente.
     restart: unless-stopped
 
+  # ----- PostgreSQL -------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: cloudtask-db
+    environment:
+      POSTGRES_USER: cloudtask
+      POSTGRES_PASSWORD: cloudtask
+      POSTGRES_DB: cloudtask
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloudtask -d cloudtask"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   api-pip-cache:
+  pgdata:

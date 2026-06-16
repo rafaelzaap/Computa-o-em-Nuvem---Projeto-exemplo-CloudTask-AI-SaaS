@@ -5,9 +5,9 @@
 
 <!-- Título e breve descrição do repositório -->
 <div align="center">
-  <h1>CloudTask AI SaaS — Semana 1 (Aulas 1 e 2)</h1>
-  <p><b>Branch <code>semana-01-fastapi-docker</code> — cobre as Aulas 1 e 2.</b></p>
-  <p><b>FastAPI mínimo + Dockerfile + devcontainer</b> (Aula 1) e <b>Docker Compose</b> (Aula 2).</p>
+  <h1>CloudTask AI SaaS — Semana 2 (Aula 3)</h1>
+  <p><b>Base da Semana 1 evoluída com PostgreSQL e CRUD de tarefas.</b></p>
+  <p><b>FastAPI + Docker Compose + PostgreSQL</b>, com persistência via SQLAlchemy.</p>
 </div>
 
 <p align="center">
@@ -20,7 +20,7 @@
 
 ## O que foi feito nesta semana
 
-Esta branch contém **as duas aulas da Semana 1**. Abaixo, o que cada aula entregou.
+Esta etapa parte da **Semana 1** e acrescenta a **Aula 3**. Abaixo, o que cada aula entregou.
 
 ### Aula 1 — Início da API (FastAPI mínimo)
 
@@ -38,10 +38,18 @@ Esta branch contém **as duas aulas da Semana 1**. Abaixo, o que cada aula entre
 - `docker-compose.prod.yml` (override) simulando a imagem `prod` localmente.
 - `.devcontainer/devcontainer.json` **migrado** de `build` direto para `dockerComposeFile` — o compose passa a ser a única fonte de verdade do ambiente.
 
+### Aula 3 — PostgreSQL e CRUD de tarefas
+
+- `docker-compose.yml` agora sobe também o serviço `db` com `postgres:16-alpine`.
+- `app/db/database.py` cria engine, sessão por requisição e `Base` do SQLAlchemy.
+- `app/db/models.py` define o modelo `Task`.
+- `app/db/schemas.py` define os schemas Pydantic de entrada e saída.
+- `app/api/routes_tasks.py` implementa CRUD completo em `/tasks`.
+
 > **Por que migrar o devcontainer para o compose já na Aula 2?**
 > Na Aula 3 (Semana 2) adicionamos o serviço `db` (PostgreSQL 16, compatível com Amazon RDS) ao mesmo compose. Com a migração feita aqui, **nada muda** no `devcontainer.json` depois — basta editar o compose, e o aluno ganha o banco automaticamente ao reabrir o devcontainer.
 
-Versão da API ao fim da semana: **`0.1.0`**.
+Versão da API nesta etapa: **`0.2.0`**.
 
 ## Pré-requisitos
 
@@ -110,6 +118,11 @@ docker run --rm -p 8000:8000 cloudtask-api:prod
 | ------ | ----------------- | -------------------------------------------- |
 | GET    | `/`               | Metadados da aplicação.                      |
 | GET    | `/health`         | Liveness probe (`{"status": "ok"}`).         |
+| POST   | `/tasks`          | Cria uma tarefa.                             |
+| GET    | `/tasks`          | Lista tarefas.                               |
+| GET    | `/tasks/{id}`     | Busca uma tarefa.                            |
+| PUT    | `/tasks/{id}`     | Atualiza uma tarefa.                         |
+| DELETE | `/tasks/{id}`     | Remove uma tarefa.                           |
 | GET    | `/docs`           | Swagger UI interativo (Markdown rico).       |
 | GET    | `/redoc`          | ReDoc.                                       |
 | GET    | `/openapi.json`   | Especificação OpenAPI.                       |
@@ -119,6 +132,7 @@ docker run --rm -p 8000:8000 cloudtask-api:prod
 ```bash
 docker compose ps                       # lista serviços rodando
 docker compose exec api sh              # shell no container da API
+docker compose exec db psql -U cloudtask -d cloudtask
 docker compose logs -f api              # tail dos logs
 docker compose build --no-cache api     # rebuild forçado
 docker compose down -v                  # para tudo + remove volumes nomeados
