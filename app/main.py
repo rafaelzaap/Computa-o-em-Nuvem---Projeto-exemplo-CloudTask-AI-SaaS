@@ -169,7 +169,7 @@ app = FastAPI(
     ],
 )
 
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_host_list)
 
 
 @app.middleware("http")
