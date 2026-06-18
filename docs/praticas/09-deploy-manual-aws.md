@@ -59,9 +59,18 @@ aws configure set region us-east-1
 > **Quando:** Aula 5. **Já coberto** na prática [`06-uploads-modo-s3.md`](06-uploads-modo-s3.md).
 > Aqui só lembramos o resumo.
 
+**Linux/macOS (bash):**
 ```bash
 export BUCKET=cloudtask-uploads-$(whoami)-$(date +%s)
 aws s3 mb s3://$BUCKET --region us-east-1
+echo "Bucket: $BUCKET"
+```
+
+**Windows (PowerShell):**
+```powershell
+# nome do bucket deve ser minúsculo e sem espaços
+$BUCKET = "cloudtask-uploads-$($env:USERNAME.ToLower())-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+aws s3 mb "s3://$BUCKET" --region us-east-1
 echo "Bucket: $BUCKET"
 ```
 
@@ -88,28 +97,15 @@ CodeBuild é **serverless** (paga só por minuto rodando), nativo da AWS e
 integra com ECR/EKS sem extra. Para esta disciplina, é o caminho mais
 didático para **ver o pipeline acontecer dentro da AWS**.
 
-> Limite Learner Lab: CodeBuild **funciona**, mas não consegue criar
-> webhooks privados (não tem permissão `iam:PassRole` ampla). Vamos buildar
-> **on-demand** (acionado manualmente).
+> Limite Learner Lab: o CodeBuild **roda**, mas a role `voclabs` **não
+> autoriza** `codebuild:ImportSourceCredentials` (conectar GitHub privado)
+> nem webhooks. No Academy a fonte do build vem de um **zip no S3**
+> ([§2.3-AWS_ACADEMY](#23-aws_academy--fonte-do-build-via-s3-sem-github)) e o build
+> é disparado **on-demand** (manual).
 
 ### Passos
 
-#### 2.1. Criar token GitHub (PAT)
-
-1. GitHub → Settings → Developer Settings → Personal Access Tokens → Tokens (classic).
-2. Permissões mínimas: `repo` (público) ou `repo` + `read:org` (privado).
-3. Copie o token (`ghp_...`).
-
-#### 2.2. Conectar no CodeBuild via CLI
-
-```bash
-aws codebuild import-source-credentials \
-  --server-type GITHUB \
-  --auth-type PERSONAL_ACCESS_TOKEN \
-  --token "ghp_SEU_TOKEN_AQUI"
-```
-
-#### 2.3. Criar `buildspec.yml` na raiz do repo
+#### 2.1. Criar `buildspec.yml` na raiz do repo
 
 ```yaml
 # buildspec.yml — usado pelo CodeBuild
@@ -128,69 +124,458 @@ phases:
       - docker tag cloudtask-api:$IMAGE_TAG $ECR_REPO_URI:latest
   post_build:
     commands:
+      # O CodeBuild roda post_build mesmo se o build falhar. Sem este guard,
+      # um build quebrado tenta o push e gera "image does not exist locally".
+      - |
+        if [ "$CODEBUILD_BUILD_SUCCEEDING" = "0" ]; then
+          echo "Build falhou — pulando push para o ECR."
+          exit 1
+        fi
       - echo "Push para ECR..."
       - docker push $ECR_REPO_URI:$IMAGE_TAG
       - docker push $ECR_REPO_URI:latest
 ```
 
+> 💡 **Imagem base via mirror ECR Public:** o `Dockerfile` usa
+> `public.ecr.aws/docker/library/python:3.11-slim` (mirror oficial do Docker
+> Hub na AWS) em vez de `python:3.11-slim`. No CodeBuild os IPs são
+> compartilhados e o pull anônimo do Docker Hub estoura o **rate limit**
+> (`429 Too Many Requests`); o mirror da AWS não tem esse limite e dispensa
+> login.
+
 Commitar e empurrar.
+
+#### 2.2. Criar token GitHub (PAT apenas conta AWS PRÓPRIA)
+
+1. GitHub → Settings → Developer Settings → Personal Access Tokens → Tokens (classic).
+2. Permissões mínimas: `repo` (público) ou `repo` + `read:org` (privado).
+3. Copie o token (`ghp_...`).
+
+#### 2.3-AWS_PROPRIA — Conectar o GitHub no CodeBuild via CLI
+
+> ⚠️ **Este comando só funciona em conta AWS própria/privada** (com IAM
+> amplo). **No AWS Academy / Learner Lab ele FALHA** — a role `voclabs` não
+> tem a permissão `codebuild:ImportSourceCredentials`:
+>
+> ```text
+> An error occurred (AccessDeniedException) when calling the
+> ImportSourceCredentials operation: User: arn:aws:sts::...:assumed-role/
+> voclabs/... is not authorized to perform: codebuild:ImportSourceCredentials
+> ```
+>
+> Não há como liberar essa permissão no Academy (IAM travado). **Se você
+> está no Learner Lab, pule este comando** e use a alternativa via S3 logo
+> abaixo ([§2.3-AWS_ACADEMY](#23-aws_academy--fonte-do-build-via-s3-sem-github)).
+
+Em **conta própria**:
+
+```bash
+aws codebuild import-source-credentials \
+  --server-type GITHUB \
+  --auth-type PERSONAL_ACCESS_TOKEN \
+  --token "ghp_SEU_TOKEN_AQUI"
+```
+
+#### 2.3-AWS_ACADEMY — Fonte do build via S3 (sem GitHub)
+
+No Learner Lab o CodeBuild não consegue clonar o GitHub (sem
+`ImportSourceCredentials`). Solução permitida pela role `voclabs`:
+**empacotar o código num zip, subir num bucket S3 e apontar o CodeBuild
+para esse zip**.
+
+**Linux/macOS (bash):**
+```bash
+# 0. (uma vez) descobrir o ACCOUNT_ID — usado aqui e na §3
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "Account: $ACCOUNT_ID"
+
+# 1. criar (ou reutilizar) um bucket para o codigo-fonte
+export SRC_BUCKET=cloudtask-src-$ACCOUNT_ID
+aws s3 mb s3://$SRC_BUCKET --region us-east-1
+
+# 2. zipar o repo (sem .git e sem lixo) e enviar ao S3
+zip -r /tmp/source.zip . -x '.git/*' '*/__pycache__/*' '*.pyc'
+aws s3 cp /tmp/source.zip s3://$SRC_BUCKET/source.zip
+
+# 3. confirmar
+aws s3 ls s3://$SRC_BUCKET/
+```
+
+**Windows (PowerShell):**
+```powershell
+# 0. (uma vez) descobrir o ACCOUNT_ID — usado aqui e na §3
+$env:ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+echo "Account: $env:ACCOUNT_ID"
+
+# 1. criar (ou reutilizar) um bucket para o codigo-fonte
+$env:SRC_BUCKET = "cloudtask-src-$env:ACCOUNT_ID"
+aws s3 mb "s3://$env:SRC_BUCKET" --region us-east-1
+
+# 2. zipar o repo e enviar ao S3 (Compress-Archive no lugar do zip).
+#    Remova .git/__pycache__ antes para não inflar o pacote.
+Compress-Archive -Path * -DestinationPath "$env:TEMP\source.zip" -Force
+aws s3 cp "$env:TEMP\source.zip" "s3://$env:SRC_BUCKET/source.zip"
+
+# 3. confirmar
+aws s3 ls "s3://$env:SRC_BUCKET/"
+```
+
+No projeto do CodeBuild (passo 2.4), em vez de **Source: GitHub**, escolha
+**Source: Amazon S3** e informe `s3://<SEU_SRC_BUCKET>/source.zip`. O resto
+(buildspec, env vars, LabRole) é idêntico.
+
+> 💡 A cada mudança no código, refaça o `zip` + `aws s3 cp` e dispare o
+> build de novo. É o "git push" manual do Academy.
 
 #### 2.4. Criar o projeto CodeBuild
 
-Via Console (Learner Lab não autoriza tudo via CLI):
+> 🟢 **AWS Academy (Learner Lab):** crie pelo **Console** (caminho A) — a
+> role `voclabs` não autoriza tudo via CLI (criar role IAM, webhook etc.).
+>
+> 🔵 **Conta AWS própria:** dá para criar **tudo via CLI** (caminho B):
+> role IAM + projeto + webhook de `git push`.
+
+**A) Via Console (Academy e conta própria):**
 
 1. Console → CodeBuild → Create build project.
 2. **Source:** GitHub → seu repo → branch `semana-04-eks-aws`.
+   - **No Academy:** escolha **Amazon S3** → `s3://cloudtask-src-<ACCOUNT_ID>/source.zip`
+     (ver [§2.3-AWS_ACADEMY](#23-aws_academy--fonte-do-build-via-s3-sem-github)).
 3. **Environment:**
    - Managed image, Ubuntu, Standard 7.0.
    - Privileged: **ON** (necessário para `docker build`).
-   - Service role: **LabRole** (única disponível).
+   - Service role: **LabRole** (única disponível no Academy).
 4. **Buildspec:** Use a buildspec file → `buildspec.yml`.
 5. **Env vars:**
    - `AWS_REGION` = `us-east-1`
    - `ECR_REPO_URI` = (preencher depois de criar repo na §3)
 6. Create build project → Start build (manual).
 
-**Resultado:** CodeBuild puxa o código do GitHub, faz `docker build`, e dá
-push pro ECR.
+**B) Via CLI (apenas conta AWS PRÓPRIA):**
+
+Pré-req: token GitHub já importado na §2.3-AWS_PROPRIA — é com essa credencial que o
+CodeBuild clona o repo.
+
+**Linux/macOS (bash):**
+```bash
+# 0. ACCOUNT_ID (se ainda não exportou nesta sessão)
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# 1. criar a role IAM que o CodeBuild assume (na conta própria não existe
+#    LabRole — você cria a sua; trust policy = "CodeBuild pode me assumir")
+aws iam create-role \
+  --role-name codebuild-cloudtask-role \
+  --assume-role-policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Principal": { "Service": "codebuild.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    }]
+  }'
+
+# 2. permissões do build: escrever logs no CloudWatch + dar push no ECR.
+#    Policies gerenciadas para simplificar a aula; em produção, aperte
+#    para o repositório/log group específicos.
+aws iam attach-role-policy --role-name codebuild-cloudtask-role \
+  --policy-arn arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+aws iam attach-role-policy --role-name codebuild-cloudtask-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+
+# 3. criar o projeto apontando direto para o GitHub
+#    (troque SEU_USUARIO/SEU_REPO; privilegedMode=true libera docker build)
+#    Se der "Invalid service role": a role do passo 1 ainda nao propagou no
+#    IAM. Aguarde ~1 min e repita ESTE comando (nao recrie a role).
+aws codebuild create-project \
+  --name cloudtask-api \
+  --source "type=GITHUB,location=https://github.com/SEU_USUARIO/SEU_REPO.git,buildspec=buildspec.yml" \
+  --source-version semana-04-eks-aws \
+  --artifacts type=NO_ARTIFACTS \
+  --environment "type=LINUX_CONTAINER,image=aws/codebuild/standard:7.0,computeType=BUILD_GENERAL1_SMALL,privilegedMode=true,environmentVariables=[{name=AWS_REGION,value=us-east-1},{name=ECR_REPO_URI,value=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api}]" \
+  --service-role arn:aws:iam::${ACCOUNT_ID}:role/codebuild-cloudtask-role
+
+# 4. (opcional) webhook: dispara build automático a cada git push na branch
+aws codebuild create-webhook \
+  --project-name cloudtask-api \
+  --filter-groups '[[{"type":"EVENT","pattern":"PUSH"},{"type":"HEAD_REF","pattern":"^refs/heads/semana-04-eks-aws$"}]]'
+```
+
+**Windows (PowerShell):**
+```powershell
+# 0. ACCOUNT_ID (se ainda não exportou nesta sessão)
+$env:ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+
+# 1. criar a role IAM que o CodeBuild assume (na conta própria não existe
+#    LabRole — você cria a sua). Here-string @'...'@ preserva o JSON.
+$trust = @'
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "Service": "codebuild.amazonaws.com" },
+    "Action": "sts:AssumeRole"
+  }]
+}
+'@
+aws iam create-role `
+  --role-name codebuild-cloudtask-role `
+  --assume-role-policy-document $trust
+
+# 2. permissões do build: logs no CloudWatch + push no ECR
+aws iam attach-role-policy --role-name codebuild-cloudtask-role `
+  --policy-arn arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+aws iam attach-role-policy --role-name codebuild-cloudtask-role `
+  --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+
+# 3. criar o projeto apontando direto para o GitHub
+#    (troque SEU_USUARIO/SEU_REPO; privilegedMode=true libera docker build)
+#    Se der "Invalid service role": a role do passo 1 ainda nao propagou no
+#    IAM. Aguarde ~1 min e repita ESTE comando (nao recrie a role).
+aws codebuild create-project `
+  --name cloudtask-api `
+  --source "type=GITHUB,location=https://github.com/SEU_USUARIO/SEU_REPO.git,buildspec=buildspec.yml" `
+  --source-version semana-04-eks-aws `
+  --artifacts type=NO_ARTIFACTS `
+  --environment "type=LINUX_CONTAINER,image=aws/codebuild/standard:7.0,computeType=BUILD_GENERAL1_SMALL,privilegedMode=true,environmentVariables=[{name=AWS_REGION,value=us-east-1},{name=ECR_REPO_URI,value=${env:ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api}]" `
+  --service-role "arn:aws:iam::${env:ACCOUNT_ID}:role/codebuild-cloudtask-role"
+
+# 4. (opcional) webhook: dispara build automático a cada git push na branch
+$filters = @'
+[[{"type":"EVENT","pattern":"PUSH"},{"type":"HEAD_REF","pattern":"^refs/heads/semana-04-eks-aws$"}]]
+'@
+aws codebuild create-webhook `
+  --project-name cloudtask-api `
+  --filter-groups $filters
+```
+
+> ⚠️ **`Invalid service role` no `create-project`?** Duas causas:
+> 1. **zsh comeu a ARN** — `$ACCOUNT_ID:role/...` em zsh vira
+>    `...<id>ole/...` (o `:r` é modificador). Por isso a ARN usa
+>    `${ACCOUNT_ID}` com chaves. Se persiste **mesmo após esperar**, é isto.
+> 2. **Propagação IAM** — role recém-criada ainda não propagou. **Aguarde
+>    ~1 min e repita** (a role está correta). Não recrie a role.
+>
+> 💡 A env var `ECR_REPO_URI` já aponta para o repositório da §3 — **crie o
+> repo ECR ([§3.1](#31-criar-o-repositório-ecr--descobrir-o-acct)) antes do
+> primeiro build**, senão o `docker push` falha.
+>
+> 💡 O webhook (passo 4) é o que transforma o build manual em **CI de
+> verdade**: cada `git push` na branch dispara o pipeline sozinho. No
+> Academy ele não existe (sem credencial GitHub) — lá o "git push" é o
+> re-zip + `aws s3 cp` da [§2.3-AWS_ACADEMY](#23-aws_academy--fonte-do-build-via-s3-sem-github).
+
+**Resultado:** CodeBuild puxa o código (GitHub ou zip no S3), faz
+`docker build`, e dá push pro ECR.
 
 ---
 
 ## 3. Semana 4 — Push da imagem para ECR
 
-> **Quando:** Aula 7. **Caminho rápido** (sem CodeBuild) — build local +
-> push direto.
+> **Quando:** Aula 7. Duas formas de colocar a imagem no ECR:
+> - **A) Deploy direto** — build local + `docker push` (rápido, sem pipeline).
+> - **B) Via CodeBuild** — a AWS builda e dá push (usa o projeto da §2).
+>
+> Os dois precisam do **repositório ECR criado** primeiro (3.1).
 
+> ⚠️ **Não confunda os dois eixos:**
+> - **Caminho A vs B** = *onde* o build roda (sua máquina vs nuvem/CodeBuild).
+> - **Conta própria vs Academy** = *qual* conta AWS (IAM amplo vs `voclabs`).
+>
+> São independentes. O **Caminho A** é **igual** nas duas contas (build é
+> local). O **Caminho B** é o único que diverge — a **fonte** do build muda:
+> GitHub (própria) ou zip no S3 (Academy) — daí o split `3.3-AWS_PROPRIA` /
+> `3.3-AWS_ACADEMY`.
+
+### 3.1. Criar o repositório ECR + descobrir o `<acct>`
+
+O `<acct>` é o **ID numérico da conta** (12 dígitos) e aparece em **toda
+URI do ECR**. Pegue-o por CLI — vale para conta própria **e** Learner Lab:
+
+**Linux/macOS (bash):**
 ```bash
-# 1. criar repo
+# ID da conta (12 dígitos) — é o <acct> das URIs
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "Account: $ACCOUNT_ID"
+
+# criar o repositorio (idempotente: ignora erro se ja existir)
 aws ecr create-repository \
   --repository-name cloudtask-api \
-  --region us-east-1
+  --region us-east-1 2>/dev/null || true
 
-# 2. capturar URI
-export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+# montar a URI completa do repositorio
 export ECR=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api
 echo "ECR URI: $ECR"
+```
 
-# 3. login no ECR
+**Windows (PowerShell):**
+```powershell
+# ID da conta (12 digitos) — e o <acct> das URIs
+$env:ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+echo "Account: $env:ACCOUNT_ID"
+
+# criar o repositorio. Se ja existir, o aws sai com erro, mas o exit code
+# de um .exe nao interrompe o PowerShell; 2>$null só esconde a mensagem.
+aws ecr create-repository `
+  --repository-name cloudtask-api `
+  --region us-east-1 2>$null
+
+# montar a URI completa do repositorio
+$env:ECR = "$env:ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api"
+echo "ECR URI: $env:ECR"
+```
+
+> 💡 Pelo Console o `<acct>` também aparece no **canto superior direito**
+> (Account ID) e na própria URI em **ECR → Repositories**.
+
+### 3.2. Caminho A — build local + push direto (sem CodeBuild)
+
+> Mesmo procedimento em **conta própria e Academy** — o build roda na **sua
+> máquina** e só o push vai pra nuvem, então não depende de role/CodeBuild.
+> (A diferença conta-própria-vs-Academy aparece no **Caminho B**, §3.3.)
+
+**Linux/macOS (bash/zsh):**
+```bash
+# 1. login no ECR (usa o $ECR da 3.1)
 aws ecr get-login-password --region us-east-1 \
   | docker login --username AWS --password-stdin $ECR
 
-# 4. build prod
+# 2. build prod
 docker build --target prod -t cloudtask-api:v0.4.0 .
 
-# 5. tag + push
-docker tag cloudtask-api:v0.4.0 $ECR:v0.4.0
-docker tag cloudtask-api:v0.4.0 $ECR:latest
-docker push $ECR:v0.4.0
-docker push $ECR:latest
+# 3. tag + push — SEMPRE use ${ECR}:tag com chaves (ver nota abaixo)
+docker tag cloudtask-api:v0.4.0 ${ECR}:v0.4.0
+docker tag cloudtask-api:v0.4.0 ${ECR}:latest
+docker push ${ECR}:v0.4.0
+docker push ${ECR}:latest
 
-# 6. listar
+# 4. listar
+aws ecr list-images --repository-name cloudtask-api
+```
+
+> ⚠️ **Use `${ECR}:latest`, não `$ECR:latest`.** No **zsh** (shell padrão do
+> macOS), `$ECR:l` é o **modificador `:l`** (lowercase): ele come o `:l` e
+> sobra `atest`, virando `cloudtask-apiatest` → `name unknown: repository
+> does not exist`. As chaves `${ECR}` delimitam o nome da variável e evitam
+> isso. No bash puro não acontece, mas `${ECR}` funciona nos dois.
+
+**Windows (PowerShell):**
+```powershell
+# 1. login no ECR (usa o $env:ECR da 3.1)
+aws ecr get-login-password --region us-east-1 `
+  | docker login --username AWS --password-stdin $env:ECR
+
+# 2. build prod
+docker build --target prod -t cloudtask-api:v0.4.0 .
+
+# 3. tag + push (chaves em ${env:ECR} separam o nome da var do ":tag")
+docker tag cloudtask-api:v0.4.0 "${env:ECR}:v0.4.0"
+docker tag cloudtask-api:v0.4.0 "${env:ECR}:latest"
+docker push "${env:ECR}:v0.4.0"
+docker push "${env:ECR}:latest"
+
+# 4. listar
 aws ecr list-images --repository-name cloudtask-api
 ```
 
 > 💡 `target prod` garante imagem **sem dev tools** (menor superfície de
 > ataque + imagem menor).
+
+### 3.3. Caminho B — build via CodeBuild (push automático)
+
+Reaproveita o projeto da §2 e o `buildspec.yml` (§2.1: login, build `target
+prod`, tag e push) — o CodeBuild executa tudo na nuvem. A **única** diferença
+entre as contas é a **fonte** do build: GitHub (própria) ou zip no S3
+(Academy). Por isso este caminho se divide em dois abaixo.
+
+#### 3.3-AWS_PROPRIA — fonte GitHub
+
+A fonte já é o GitHub (configurada na §2.4). Cada `git push` na branch já
+dispara o build pelo **webhook** (§2.4); para disparar **manualmente**:
+
+**Linux/macOS (bash):**
+```bash
+# 1. disparar o build (use o NOME do projeto criado na 2.4)
+export BUILD_ID=$(aws codebuild start-build \
+  --project-name cloudtask-api \
+  --query 'build.id' --output text)
+echo "Build: $BUILD_ID"
+
+# 2. acompanhar o status (repita ate SUCCEEDED; ~2-4 min)
+aws codebuild batch-get-builds --ids $BUILD_ID \
+  --query 'builds[0].buildStatus' --output text
+# IN_PROGRESS -> SUCCEEDED
+
+# 3. confirmar a imagem no ECR
+aws ecr list-images --repository-name cloudtask-api
+```
+
+**Windows (PowerShell):**
+```powershell
+# 1. disparar o build (use o NOME do projeto criado na 2.4)
+$env:BUILD_ID = aws codebuild start-build `
+  --project-name cloudtask-api `
+  --query 'build.id' --output text
+echo "Build: $env:BUILD_ID"
+
+# 2. acompanhar o status (repita ate SUCCEEDED; ~2-4 min)
+aws codebuild batch-get-builds --ids $env:BUILD_ID `
+  --query 'builds[0].buildStatus' --output text
+# IN_PROGRESS -> SUCCEEDED
+
+# 3. confirmar a imagem no ECR
+aws ecr list-images --repository-name cloudtask-api
+```
+
+#### 3.3-AWS_ACADEMY — fonte zip → S3
+
+Sem credencial GitHub, a fonte é um **zip no S3**
+([§2.3-AWS_ACADEMY](#23-aws_academy--fonte-do-build-via-s3-sem-github)).
+Reempacote e suba o código **antes de cada build** — é o "git push" manual
+do Academy.
+
+**Linux/macOS (bash):**
+```bash
+# 1. reempacotar o codigo e subir ao S3
+zip -r /tmp/source.zip . -x '.git/*' '*/__pycache__/*' '*.pyc'
+aws s3 cp /tmp/source.zip s3://cloudtask-src-$ACCOUNT_ID/source.zip
+
+# 2. disparar o build
+export BUILD_ID=$(aws codebuild start-build \
+  --project-name cloudtask-api \
+  --query 'build.id' --output text)
+echo "Build: $BUILD_ID"
+
+# 3. acompanhar o status + confirmar a imagem
+aws codebuild batch-get-builds --ids $BUILD_ID \
+  --query 'builds[0].buildStatus' --output text
+aws ecr list-images --repository-name cloudtask-api
+```
+
+**Windows (PowerShell):**
+```powershell
+# 1. reempacotar o codigo e subir ao S3
+Compress-Archive -Path * -DestinationPath "$env:TEMP\source.zip" -Force
+aws s3 cp "$env:TEMP\source.zip" "s3://cloudtask-src-$env:ACCOUNT_ID/source.zip"
+
+# 2. disparar o build
+$env:BUILD_ID = aws codebuild start-build `
+  --project-name cloudtask-api `
+  --query 'build.id' --output text
+echo "Build: $env:BUILD_ID"
+
+# 3. acompanhar o status + confirmar a imagem
+aws codebuild batch-get-builds --ids $env:BUILD_ID `
+  --query 'builds[0].buildStatus' --output text
+aws ecr list-images --repository-name cloudtask-api
+```
+
+> 💡 Se `start-build` falhar por permissão no Academy, dispare pelo Console
+> (CodeBuild → projeto → **Start build**). O acompanhamento por CLI continua
+> valendo.
+
+> 💡 A env var `ECR_REPO_URI` é configurada no Console do CodeBuild
+> (projeto → Edit → Environment → Env vars), não no shell:
+> `ECR_REPO_URI = <acct>.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api`.
 
 **Cleanup do ECR:** seção [§11](#11-sempre--cleanup-obrigatorio).
 
@@ -210,7 +595,191 @@ aws ecr list-images --repository-name cloudtask-api
 - Cobra só pelo tempo do container ligado.
 - Suba em ~5 min.
 
-### Passos (via Console — Learner Lab limita CLI)
+### Passos
+
+> 🔵 **Conta AWS própria:** crie **tudo via CLI** (§4.1-AWS_PROPRIA).
+>
+> 🟢 **AWS Academy (Learner Lab):** crie pelo **Console** (§4.1-AWS_ACADEMY) —
+> a role `voclabs` não autoriza criar a task execution role via CLI. O
+> Console também serve à conta própria, se preferir clicar.
+
+#### 4.1-AWS_PROPRIA — via CLI (apenas conta própria)
+
+Na conta própria não existe `LabRole`: você cria a **task execution role**
+(deixa o Fargate puxar do ECR e mandar logs). O resto é cluster → task
+definition → rede → service.
+
+> ⚠️ **`Role is not valid` no `register-task-definition`?** Duas causas (a #1
+> derruba o resto em cascata: `TaskDefinition not found`, `Service not found`):
+> 1. **zsh comeu a ARN no heredoc** — `$ACCOUNT_ID:role/...` em zsh vira
+>    `...<id>ole/...` (o `:r` é modificador, igual ao `:l` do `:latest`). Por
+>    isso o JSON usa `${ACCOUNT_ID}` e `${ECR}` com chaves. Confira com
+>    `grep executionRoleArn /tmp/fargate-taskdef.json` — se aparecer `ole/`, é
+>    isto: regere o arquivo (passo 3) e siga.
+> 2. **Propagação IAM** — role do passo 1 ainda não propagou. Espere ~15 s.
+>
+> Se já caiu, repita só a partir do passo 3 — cluster e role já existem.
+```bash
+# 0. pre-req: imagem ja no ECR (§3); ACCOUNT_ID e URI
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export ECR=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api
+
+# 1. task execution role (idempotente). Trust = ecs-tasks pode assumir.
+aws iam create-role --role-name ecsTaskExecutionRole \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}' 2>/dev/null || true
+aws iam attach-role-policy --role-name ecsTaskExecutionRole \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+# 2. cluster Fargate
+aws ecs create-cluster --cluster-name cloudtask-fargate
+
+# 3. task definition via arquivo (evita quoting de JSON no shell)
+cat > /tmp/fargate-taskdef.json <<JSON
+{
+  "family": "cloudtask-api",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "containerDefinitions": [{
+    "name": "api",
+    "image": "${ECR}:latest",
+    "essential": true,
+    "portMappings": [{"containerPort": 8000, "protocol": "tcp"}],
+    "environment": [
+      {"name": "DATABASE_URL", "value": "postgresql://USER:SENHA@HOST:5432/cloudtask"},
+      {"name": "SECRET_KEY", "value": "troque-isto"}
+    ]
+  }]
+}
+JSON
+aws ecs register-task-definition --cli-input-json file:///tmp/fargate-taskdef.json
+
+# 4. rede: VPC default, 1 subnet publica, SG liberando 8000
+export VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true \
+  --query 'Vpcs[0].VpcId' --output text)
+export SUBNET_ID=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC_ID \
+  --query 'Subnets[0].SubnetId' --output text)
+# VPC default sem subnets (conta "limpa")? recria uma subnet default.
+# Sem isso, create-service falha com "Subnet ID must match subnet-...".
+if [ -z "$SUBNET_ID" ] || [ "$SUBNET_ID" = "None" ]; then
+  aws ec2 create-default-subnet --availability-zone us-east-1a >/dev/null
+  export SUBNET_ID=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC_ID \
+    --query 'Subnets[0].SubnetId' --output text)
+fi
+echo "SUBNET_ID=$SUBNET_ID"
+# cria o SG; se ja existir (re-run), reaproveita o ID existente.
+# Atribui SEM export (export sempre retorna 0 e mascararia a falha do $(...)).
+SG_ID=$(aws ec2 create-security-group --group-name cloudtask-fargate-sg \
+  --description "ECS Fargate 8000" --vpc-id $VPC_ID --query 'GroupId' --output text 2>/dev/null)
+if [ -z "$SG_ID" ]; then
+  SG_ID=$(aws ec2 describe-security-groups \
+    --filters Name=group-name,Values=cloudtask-fargate-sg Name=vpc-id,Values=$VPC_ID \
+    --query 'SecurityGroups[0].GroupId' --output text)
+fi
+export SG_ID
+echo "SG_ID=$SG_ID"
+# regra 8000 (|| true: ignora se a regra ja existir)
+aws ec2 authorize-security-group-ingress --group-id $SG_ID \
+  --protocol tcp --port 8000 --cidr 0.0.0.0/0 2>/dev/null || true
+
+# 5. servico (1 task, IP publico para testar sem LB)
+aws ecs create-service --cluster cloudtask-fargate --service-name cloudtask-api \
+  --task-definition cloudtask-api --desired-count 1 --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_ID],securityGroups=[$SG_ID],assignPublicIp=ENABLED}"
+
+# 6. IP publico da task (espere ~1 min ate RUNNING)
+export TASK_ARN=$(aws ecs list-tasks --cluster cloudtask-fargate \
+  --service-name cloudtask-api --query 'taskArns[0]' --output text)
+export ENI_ID=$(aws ecs describe-tasks --cluster cloudtask-fargate --tasks $TASK_ARN \
+  --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value" --output text)
+aws ec2 describe-network-interfaces --network-interface-ids $ENI_ID \
+  --query "NetworkInterfaces[0].Association.PublicIp" --output text
+# curl http://<IP>:8000/health
+```
+
+**Windows (PowerShell):**
+```powershell
+# 0. pre-req: imagem ja no ECR (§3); ACCOUNT_ID e URI
+$env:ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+$env:ECR = "$env:ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/cloudtask-api"
+
+# 1. task execution role (se ja existir, o erro do .exe nao interrompe)
+aws iam create-role --role-name ecsTaskExecutionRole `
+  --assume-role-policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ecs-tasks.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}' 2>$null
+aws iam attach-role-policy --role-name ecsTaskExecutionRole `
+  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+# 2. cluster Fargate
+aws ecs create-cluster --cluster-name cloudtask-fargate
+
+# 3. task definition via arquivo (here-string @"..."@ interpola as vars)
+$taskdef = @"
+{
+  "family": "cloudtask-api",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::$($env:ACCOUNT_ID):role/ecsTaskExecutionRole",
+  "containerDefinitions": [{
+    "name": "api",
+    "image": "$($env:ECR):latest",
+    "essential": true,
+    "portMappings": [{"containerPort": 8000, "protocol": "tcp"}],
+    "environment": [
+      {"name": "DATABASE_URL", "value": "postgresql://USER:SENHA@HOST:5432/cloudtask"},
+      {"name": "SECRET_KEY", "value": "troque-isto"}
+    ]
+  }]
+}
+"@
+$taskdef | Out-File -Encoding ascii "$env:TEMP\fargate-taskdef.json"
+aws ecs register-task-definition --cli-input-json "file://$env:TEMP\fargate-taskdef.json"
+
+# 4. rede: VPC default, 1 subnet publica, SG liberando 8000
+$env:VPC_ID = aws ec2 describe-vpcs --filters Name=isDefault,Values=true `
+  --query 'Vpcs[0].VpcId' --output text
+$env:SUBNET_ID = aws ec2 describe-subnets --filters Name=vpc-id,Values=$env:VPC_ID `
+  --query 'Subnets[0].SubnetId' --output text
+# VPC default sem subnets (conta "limpa")? recria uma subnet default.
+# Sem isso, create-service falha com "Subnet ID must match subnet-...".
+if (-not $env:SUBNET_ID -or $env:SUBNET_ID -eq 'None') {
+  aws ec2 create-default-subnet --availability-zone us-east-1a | Out-Null
+  $env:SUBNET_ID = aws ec2 describe-subnets --filters Name=vpc-id,Values=$env:VPC_ID `
+    --query 'Subnets[0].SubnetId' --output text
+}
+echo "SUBNET_ID=$env:SUBNET_ID"
+# cria o SG; se ja existir (re-run), reaproveita o ID existente
+$env:SG_ID = aws ec2 create-security-group --group-name cloudtask-fargate-sg `
+  --description "ECS Fargate 8000" --vpc-id $env:VPC_ID --query 'GroupId' --output text 2>$null
+if (-not $env:SG_ID) {
+  $env:SG_ID = aws ec2 describe-security-groups `
+    --filters Name=group-name,Values=cloudtask-fargate-sg Name=vpc-id,Values=$env:VPC_ID `
+    --query 'SecurityGroups[0].GroupId' --output text
+}
+echo "SG_ID=$env:SG_ID"
+# regra 8000 (ignora se a regra ja existir)
+aws ec2 authorize-security-group-ingress --group-id $env:SG_ID `
+  --protocol tcp --port 8000 --cidr 0.0.0.0/0 2>$null
+
+# 5. servico (1 task, IP publico para testar sem LB)
+aws ecs create-service --cluster cloudtask-fargate --service-name cloudtask-api `
+  --task-definition cloudtask-api --desired-count 1 --launch-type FARGATE `
+  --network-configuration "awsvpcConfiguration={subnets=[$env:SUBNET_ID],securityGroups=[$env:SG_ID],assignPublicIp=ENABLED}"
+
+# 6. IP publico da task (espere ~1 min ate RUNNING)
+$env:TASK_ARN = aws ecs list-tasks --cluster cloudtask-fargate `
+  --service-name cloudtask-api --query 'taskArns[0]' --output text
+$env:ENI_ID = aws ecs describe-tasks --cluster cloudtask-fargate --tasks $env:TASK_ARN `
+  --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value" --output text
+aws ec2 describe-network-interfaces --network-interface-ids $env:ENI_ID `
+  --query "NetworkInterfaces[0].Association.PublicIp" --output text
+# curl http://<IP>:8000/health
+```
+
+#### 4.1-AWS_ACADEMY — via Console (também serve à conta própria)
 
 1. Console → ECS → Clusters → Create cluster.
    - Cluster name: `cloudtask-fargate`.
@@ -234,17 +803,219 @@ aws ecr list-images --repository-name cloudtask-api
    - Public IP: ENABLED (para testar sem LB).
 4. Aguardar `RUNNING` → pegar Public IP da task → `curl http://<IP>:8000/health`.
 
-> ⚠️ **`Public IP: ENABLED` é didático**, NÃO usar em produção real. Em
-> produção: Fargate atrás de ALB.
+> ⚠️ **`Public IP: ENABLED` / `--cidr 0.0.0.0/0` é didático**, NÃO usar em
+> produção real. Em produção: Fargate atrás de ALB, sem IP público.
+
+> 🩺 **Task presa em `PENDING` e nunca vira `RUNNING`?** A VPC default da conta
+> pode estar **sem Internet Gateway** (contas "limpas" às vezes perdem IGW e
+> subnets) — sem IGW o Fargate não alcança o ECR para puxar a imagem. Sintoma:
+> a rota `0.0.0.0/0` da route table aparece como **blackhole**. Recrie o IGW
+> (mexe em rede da VPC — rode com consciência):
+> ```bash
+> IGW_ID=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text)
+> aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
+> RT_ID=$(aws ec2 describe-route-tables --filters Name=vpc-id,Values=$VPC_ID Name=association.main,Values=true \
+>   --query 'RouteTables[0].RouteTableId' --output text)
+> aws ec2 replace-route --route-table-id $RT_ID --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID
+> ```
+
+---
+
+#### 4.2-AWS_PROPRIA — variante didática: 2 containers (API + Postgres) e a prova da perda de dados
+
+> **Continua do [§4.1-AWS_PROPRIA](#41-aws_propria--via-cli-apenas-conta-propria):**
+> reusa `$ACCOUNT_ID`, `$ECR`, a role `ecsTaskExecutionRole`, o cluster
+> `cloudtask-fargate`, o `$SUBNET_ID` e o `$SG_ID` já criados lá.
+>
+> **Objetivo:** o §4.1 sobe **só a API**; aqui ela ganha um **Postgres como
+> container ao lado** (mesma task) e a gente **prova na prática** por que
+> produção precisa de banco gerenciado (RDS) — o banco aqui é efêmero **de
+> propósito**.
+
+##### Por que isto é didático (e arriscado na vida real)
+
+| Risco | O que acontece |
+| --- | --- |
+| **Perda de dados** | Fargate **não tem disco persistente**. Restart da task → banco zerado. |
+| Sem backup | Nenhum snapshot automático. Acidente = recriação manual. |
+| Sem Multi-AZ | A AZ cair derruba API e banco juntos. |
+| Migração frágil | Cada restart roda `create_all` do zero, sem versionar schema. |
+
+O exercício existe para você **sentir** isso: subir → criar tarefas → forçar
+restart → constatar que sumiram → concluir que produção pede **RDS**
+([§7](#7-semana-68--trocar-postgres-por-rds)).
+
+##### Arquitetura
+
+```text
+   ┌───────────────────────────────────────────────┐
+   │        ECS Fargate Task (1 task)              │
+   │  ┌──────────────┐      ┌───────────────┐      │
+   │  │ api          │◄────►│ db (postgres) │      │
+   │  │ uvicorn:8000 │      │ :5432         │      │
+   │  └──────────────┘      └───────────────┘      │
+   │   2 containers / 1 task → falam via localhost │
+   └───────────────────────────────────────────────┘
+                  │ Public IP :8000
+                  ▼ usuário
+```
+
+> 💡 No `DATABASE_URL` o host é `localhost:5432` porque os 2 containers
+> compartilham a mesma rede dentro da task Fargate.
+
+##### Passo 1 — registrar o task-def de 2 containers
+
+A task definition já está **versionada no repo**:
+[`infra/aws/task-def-fargate-api-db.json`](../../infra/aws/task-def-fargate-api-db.json)
+(api + Postgres, `dependsOn` db `HEALTHY`, healthCheck `pg_isready`). Os
+placeholders estão explicados em
+[`infra/aws/README.md`](../../infra/aws/README.md). Resolva-os e registre — a
+`family` é `cloudtask-api`, então isto vira **uma nova revisão**:
+
+**Linux/macOS (bash):**
+```bash
+# pre-req: $ACCOUNT_ID e $ECR exportados no §4.1-AWS_PROPRIA
+EXEC_ROLE="arn:aws:iam::${ACCOUNT_ID}:role/ecsTaskExecutionRole"
+sed -e "s|<ACCOUNT_ID>|${ACCOUNT_ID}|g" \
+    -e "s|EXEC_ROLE_ARN|${EXEC_ROLE}|g" \
+    -e "s|TASK_ROLE_ARN|${EXEC_ROLE}|g" \
+    -e "s|<TROQUE_SENHA_DB>|$(openssl rand -hex 16)|g" \
+    -e "s|<TROQUE_SECRET_KEY>|$(openssl rand -hex 32)|g" \
+    infra/aws/task-def-fargate-api-db.json > /tmp/task-def-apidb.json
+aws ecs register-task-definition --cli-input-json file:///tmp/task-def-apidb.json
+```
+
+**Windows (PowerShell):**
+```powershell
+# pre-req: $env:ACCOUNT_ID e $env:ECR definidos no §4.1-AWS_PROPRIA
+$exec   = "arn:aws:iam::$($env:ACCOUNT_ID):role/ecsTaskExecutionRole"
+$pgpass = -join ((1..32) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
+$skey   = -join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
+(Get-Content infra/aws/task-def-fargate-api-db.json) `
+  -replace '<ACCOUNT_ID>', $env:ACCOUNT_ID `
+  -replace 'EXEC_ROLE_ARN', $exec `
+  -replace 'TASK_ROLE_ARN', $exec `
+  -replace '<TROQUE_SENHA_DB>', $pgpass `
+  -replace '<TROQUE_SECRET_KEY>', $skey |
+  Set-Content "$env:TEMP\task-def-apidb.json" -Encoding ascii
+aws ecs register-task-definition --cli-input-json "file://$env:TEMP\task-def-apidb.json"
+```
+
+> 🔐 Aqui os segredos vão **em texto plano** na task def (didático, descartável).
+> Em produção real use **AWS Secrets Manager / SSM** e o campo `secrets` da
+> container definition — nunca segredo cru na task def.
+
+##### Passo 2 — apontar o service para a nova revisão
+
+```bash
+# bash e PowerShell são idênticos aqui (só chamadas 'aws')
+aws ecs update-service --cluster cloudtask-fargate --service cloudtask-api \
+  --task-definition cloudtask-api --force-new-deployment
+aws ecs wait services-stable --cluster cloudtask-fargate --services cloudtask-api
+```
+
+> Se você ainda **não** criou o service (pulou o §4.1), crie agora reusando
+> `$SUBNET_ID` e `$SG_ID` daquela seção:
+> ```bash
+> aws ecs create-service --cluster cloudtask-fargate --service-name cloudtask-api \
+>   --task-definition cloudtask-api --desired-count 1 --launch-type FARGATE \
+>   --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_ID],securityGroups=[$SG_ID],assignPublicIp=ENABLED}"
+> ```
+
+##### Passo 3 — pegar o Public IP e testar
+
+**Linux/macOS (bash):**
+```bash
+TASK_ARN=$(aws ecs list-tasks --cluster cloudtask-fargate \
+  --service-name cloudtask-api --query 'taskArns[0]' --output text)
+ENI_ID=$(aws ecs describe-tasks --cluster cloudtask-fargate --tasks $TASK_ARN \
+  --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value | [0]" --output text)
+export PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids $ENI_ID \
+  --query "NetworkInterfaces[0].Association.PublicIp" --output text)
+echo "API em http://$PUBLIC_IP:8000"
+curl http://$PUBLIC_IP:8000/health
+curl http://$PUBLIC_IP:8000/health/ready   # agora db=ok (tem Postgres ao lado)
+```
+
+**Windows (PowerShell):**
+```powershell
+$TASK_ARN = aws ecs list-tasks --cluster cloudtask-fargate --service-name cloudtask-api --query 'taskArns[0]' --output text
+$ENI_ID = aws ecs describe-tasks --cluster cloudtask-fargate --tasks $TASK_ARN --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value | [0]" --output text
+$env:PUBLIC_IP = aws ec2 describe-network-interfaces --network-interface-ids $ENI_ID --query "NetworkInterfaces[0].Association.PublicIp" --output text
+echo "API em http://$($env:PUBLIC_IP):8000"
+curl.exe http://$($env:PUBLIC_IP):8000/health
+curl.exe http://$($env:PUBLIC_IP):8000/health/ready
+```
+
+##### Passo 4 — a prova da perda de dados
+
+**Linux/macOS (bash):**
+```bash
+# 1. criar 5 tarefas
+for i in 1 2 3 4 5; do
+  curl -sX POST http://$PUBLIC_IP:8000/tasks -H "Content-Type: application/json" \
+    -d "{\"title\":\"Tarefa Fargate #$i\",\"priority\":\"high\"}" >/dev/null
+done
+curl -s http://$PUBLIC_IP:8000/tasks | python -c "import sys,json;print(len(json.load(sys.stdin)))"
+# 5
+
+# 2. forçar restart (mata a task; o service sobe outra, SEM o disco antigo)
+aws ecs stop-task --cluster cloudtask-fargate --task $TASK_ARN \
+  --reason "demo perda de dados sem volume"
+aws ecs wait services-stable --cluster cloudtask-fargate --services cloudtask-api
+
+# 3. recapturar o IP (task nova = IP novo) e conferir
+TASK_ARN=$(aws ecs list-tasks --cluster cloudtask-fargate --service-name cloudtask-api --query 'taskArns[0]' --output text)
+ENI_ID=$(aws ecs describe-tasks --cluster cloudtask-fargate --tasks $TASK_ARN \
+  --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value | [0]" --output text)
+export PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids $ENI_ID \
+  --query "NetworkInterfaces[0].Association.PublicIp" --output text)
+curl -s http://$PUBLIC_IP:8000/tasks | python -c "import sys,json;print(json.load(sys.stdin))"
+# []  ← as 5 tarefas sumiram
+```
+
+**Windows (PowerShell):**
+```powershell
+# 1. criar 5 tarefas
+1..5 | ForEach-Object {
+  curl.exe -sX POST http://$($env:PUBLIC_IP):8000/tasks -H "Content-Type: application/json" `
+    -d "{\"title\":\"Tarefa Fargate #$_\",\"priority\":\"high\"}" | Out-Null
+}
+(curl.exe -s http://$($env:PUBLIC_IP):8000/tasks | ConvertFrom-Json).Count
+# 5
+
+# 2. forcar restart
+aws ecs stop-task --cluster cloudtask-fargate --task $TASK_ARN --reason "demo perda de dados sem volume"
+aws ecs wait services-stable --cluster cloudtask-fargate --services cloudtask-api
+
+# 3. recapturar IP e conferir
+$TASK_ARN = aws ecs list-tasks --cluster cloudtask-fargate --service-name cloudtask-api --query 'taskArns[0]' --output text
+$ENI_ID = aws ecs describe-tasks --cluster cloudtask-fargate --tasks $TASK_ARN --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value | [0]" --output text
+$env:PUBLIC_IP = aws ec2 describe-network-interfaces --network-interface-ids $ENI_ID --query "NetworkInterfaces[0].Association.PublicIp" --output text
+curl.exe -s http://$($env:PUBLIC_IP):8000/tasks
+# []  <- as 5 tarefas sumiram
+```
+
+> 🎯 **Demonstrado.** As 5 tarefas evaporaram: o `create_all` recria o schema
+> vazio, mas os dados não voltam. Em produção isso = clientes perdendo trabalho.
+> É exatamente o motivo de migrar para **RDS** ([§7](#7-semana-68--trocar-postgres-por-rds)).
+>
+> O **Cleanup Fargate** abaixo já cobre esta variante (mesmo service/cluster/SG).
+
+---
 
 **Cleanup Fargate:**
 
 ```bash
+# zera e remove service + cluster (Academy e propria)
 aws ecs update-service --cluster cloudtask-fargate \
   --service cloudtask-api --desired-count 0
 aws ecs delete-service --cluster cloudtask-fargate \
   --service cloudtask-api --force
 aws ecs delete-cluster --cluster cloudtask-fargate
+
+# conta propria: apague tambem o SG criado na CLI (a role pode ficar p/ reuso)
+aws ec2 delete-security-group --group-name cloudtask-fargate-sg 2>/dev/null || true
 ```
 
 ---
@@ -364,6 +1135,7 @@ curl http://$ELB_DNS:8000/health
 
 #### 7.1. Criar RDS via CLI
 
+**Linux/macOS (bash):**
 ```bash
 # Security Group permitindo 5432 só do EKS
 export VPC_ID=$(aws eks describe-cluster --name cloudtask-eks \
@@ -400,8 +1172,49 @@ aws rds create-db-instance \
 aws rds wait db-instance-available --db-instance-identifier cloudtask-db
 ```
 
+**Windows (PowerShell):**
+```powershell
+# Security Group permitindo 5432 só do EKS
+$env:VPC_ID = aws eks describe-cluster --name cloudtask-eks `
+  --query "cluster.resourcesVpcConfig.vpcId" --output text
+
+aws ec2 create-security-group `
+  --group-name rds-sg `
+  --description "RDS access from EKS" `
+  --vpc-id $env:VPC_ID
+$env:RDS_SG = aws ec2 describe-security-groups `
+  --filters "Name=group-name,Values=rds-sg" `
+  --query "SecurityGroups[0].GroupId" --output text
+
+# Liberar 5432 do CIDR do EKS (ajuste conforme VPC do EKS)
+aws ec2 authorize-security-group-ingress `
+  --group-id $env:RDS_SG `
+  --protocol tcp --port 5432 `
+  --cidr 10.0.0.0/8
+
+# senha aleatória (32 chars hex, equivalente a openssl rand -hex 16)
+$PWD_RDS = -join (1..32 | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
+
+# Criar instância RDS
+aws rds create-db-instance `
+  --db-instance-identifier cloudtask-db `
+  --db-instance-class db.t3.micro `
+  --engine postgres `
+  --engine-version 16.3 `
+  --master-username cloudtask `
+  --master-user-password $PWD_RDS `
+  --allocated-storage 20 `
+  --vpc-security-group-ids $env:RDS_SG `
+  --db-name cloudtask `
+  --no-publicly-accessible
+
+# aguardar (~8 min)
+aws rds wait db-instance-available --db-instance-identifier cloudtask-db
+```
+
 #### 7.2. Capturar endpoint
 
+**Linux/macOS (bash):**
 ```bash
 export RDS_HOST=$(aws rds describe-db-instances \
   --db-instance-identifier cloudtask-db \
@@ -409,12 +1222,36 @@ export RDS_HOST=$(aws rds describe-db-instances \
 echo "RDS: $RDS_HOST"
 ```
 
+**Windows (PowerShell):**
+```powershell
+$env:RDS_HOST = aws rds describe-db-instances `
+  --db-instance-identifier cloudtask-db `
+  --query "DBInstances[0].Endpoint.Address" --output text
+echo "RDS: $env:RDS_HOST"
+```
+
 #### 7.3. Atualizar Secret e ConfigMap no EKS
 
+**Linux/macOS (bash):**
 ```bash
 kubectl create secret generic cloudtask-secrets \
   --namespace cloudtask \
   --from-literal=DATABASE_URL=postgresql://cloudtask:SUA_SENHA@$RDS_HOST:5432/cloudtask \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# remover o Pod do Postgres (não precisa mais)
+kubectl delete -f infra/k8s/aws/postgres-deployment.yaml
+kubectl delete -f infra/k8s/aws/postgres-service.yaml
+
+# reiniciar a API para pegar a nova DATABASE_URL
+kubectl rollout restart deployment/api -n cloudtask
+```
+
+**Windows (PowerShell):**
+```powershell
+kubectl create secret generic cloudtask-secrets `
+  --namespace cloudtask `
+  --from-literal=DATABASE_URL=postgresql://cloudtask:SUA_SENHA@${env:RDS_HOST}:5432/cloudtask `
   --dry-run=client -o yaml | kubectl apply -f -
 
 # remover o Pod do Postgres (não precisa mais)
@@ -441,6 +1278,9 @@ curl http://$ELB_DNS:8000/health/ready
 
 ### 8.1. Criar segredo
 
+O JSON do `--secret-string` tem aspas, então o quoting **muda por shell**:
+
+**Linux/macOS (bash)** — aspas simples seguram o JSON inteiro:
 ```bash
 aws secretsmanager create-secret \
   --name cloudtask/prod \
@@ -451,6 +1291,22 @@ aws secretsmanager create-secret \
     "AWS_REGION":"us-east-1",
     "S3_BUCKET_NAME":"cloudtask-uploads-..."
   }'
+```
+
+**Windows (PowerShell)** — use here-string `@'...'@` (literal, não expande `$`):
+```powershell
+$secret = @'
+{
+  "DATABASE_URL":"postgresql://cloudtask:SENHA@HOST:5432/cloudtask",
+  "SECRET_KEY":"...",
+  "AWS_REGION":"us-east-1",
+  "S3_BUCKET_NAME":"cloudtask-uploads-..."
+}
+'@
+aws secretsmanager create-secret `
+  --name cloudtask/prod `
+  --description "Credenciais e config CloudTask" `
+  --secret-string $secret
 ```
 
 ### 8.2. Consumir no EKS — duas formas
@@ -486,9 +1342,21 @@ initContainers:
         mountPath: /env
 ```
 
-> ⚠️ Em ambos os casos, o **pod precisa de IAM role** com permissão
-> `secretsmanager:GetSecretValue`. No Learner Lab usa `LabRole`; em produção
-> use **IRSA** (IAM Roles for Service Accounts).
+> 🔵 **Conta AWS real:** o caminho recomendado é a forma **(A) External Secrets
+> Operator** com **IRSA** (IAM Roles for Service Accounts): o pod assume uma IAM
+> role dedicada com `secretsmanager:GetSecretValue`. Requer um **OIDC provider**
+> registrado no cluster (`eksctl utils associate-iam-oidc-provider`) e uma role
+> ligada à ServiceAccount.
+>
+> 🟢 **AWS Academy (Learner Lab):** a forma (A) **não funciona** — criar o OIDC
+> provider e a role exige `iam:CreateOpenIDConnectProvider` / `iam:CreateRole`,
+> **bloqueados** para a `voclabs`. Use uma destas:
+> 1. **Forma (B), init container** acima — o pod usa a `LabRole` (que já tem
+>    acesso ao Secrets Manager) via instance profile dos nós. Mais simples,
+>    funciona no Lab.
+> 2. **Secret nativo do K8s** (`kubectl create secret generic ... --from-env-file`)
+>    em base64 — sem Secrets Manager. É o suficiente para a aula; apaga tudo no
+>    fim. Menos auditável, mas zero dependência de IAM.
 
 ### 8.3. Cleanup
 
@@ -525,16 +1393,45 @@ kubectl get pods -n cloudtask -w
 
 ## 10. Semana 6 — DynamoDB para eventos
 
+> 🔵 **Conta AWS real:** `dynamodb:CreateTable` funciona; siga os passos abaixo.
+>
+> 🟢 **AWS Academy (Learner Lab):** o DynamoDB **pode estar bloqueado** ou com
+> limite de tabelas (`AccessDenied` em `dynamodb:CreateTable`). **Teste antes da
+> aula.** Se não funcionar, use o **fallback local** que a aplicação já suporta —
+> sem AWS nenhuma:
+>
+> ```
+> EVENT_STORE_MODE=local            # em vez de dynamodb
+> LOCAL_EVENTS_FILE=./local_events/events.json
+> ```
+>
+> Os eventos vão para um arquivo JSON (igual ao fallback local dos uploads). A
+> lição de "object/NoSQL store desacoplado da app" se mantém.
+
+Criar a tabela — a quebra de linha muda por shell (`\` no bash, `` ` `` no
+PowerShell):
+
+**Linux/macOS (bash):**
 ```bash
 # 1. criar tabela (PAY_PER_REQUEST = só paga por uso)
 aws dynamodb create-table \
   --table-name cloudtask-events \
-  --attribute-definitions \
-    AttributeName=id,AttributeType=S \
+  --attribute-definitions AttributeName=id,AttributeType=S \
   --key-schema AttributeName=id,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST
+```
 
-# 2. esperar ativa
+**Windows (PowerShell):**
+```powershell
+aws dynamodb create-table `
+  --table-name cloudtask-events `
+  --attribute-definitions AttributeName=id,AttributeType=S `
+  --key-schema AttributeName=id,KeyType=HASH `
+  --billing-mode PAY_PER_REQUEST
+```
+
+```bash
+# 2. esperar ativa (igual nos dois shells)
 aws dynamodb wait table-exists --table-name cloudtask-events
 
 # 3. configurar no Secrets Manager (ou ConfigMap)
@@ -549,6 +1446,9 @@ curl -X POST http://$ELB_DNS:8000/events \
 # 5. ver na tabela
 aws dynamodb scan --table-name cloudtask-events --max-items 5
 ```
+
+> 💡 No passo 4, no PowerShell a variável é `$env:ELB_DNS` (não `$ELB_DNS`) se
+> você a exportou via `$env:`. O `curl` real do Windows é `curl.exe`.
 
 **Cleanup:**
 
@@ -578,8 +1478,9 @@ aws rds delete-db-instance \
   --db-instance-identifier cloudtask-db \
   --skip-final-snapshot
 
-# 5. apagar bucket S3
+# 5. apagar buckets S3 (uploads e, se usou CodeBuild no Academy, o de fonte)
 aws s3 rb s3://$BUCKET --force
+aws s3 rb s3://cloudtask-src-$ACCOUNT_ID --force 2>/dev/null || true
 
 # 6. apagar repo ECR
 aws ecr delete-repository --repository-name cloudtask-api --force
@@ -613,7 +1514,7 @@ houver gasto, alguma coisa escapou.
 | --- | :---: | :---: |
 | Criar bucket S3 | ⭐ | Aula 5 |
 | Login + push ECR | ⭐⭐ | Aula 7 |
-| ECS Fargate Console | ⭐⭐ | Aula 7 (opcional) |
+| ECS Fargate (CLI própria / Console Academy) | ⭐⭐ | Aula 7 (opcional) |
 | CodeBuild + GitHub | ⭐⭐⭐ | Aula 7 |
 | EKS + manifests | ⭐⭐⭐⭐ | Aula 8 |
 | Postgres como Pod | ⭐⭐ | Aula 8 |

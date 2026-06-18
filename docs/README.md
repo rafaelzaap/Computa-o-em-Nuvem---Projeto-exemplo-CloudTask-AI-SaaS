@@ -51,7 +51,7 @@ Tutoriais com comandos. Cada arquivo é um exercício prático que você pode (e
 | [`praticas/10-kubernetes-kind-local.md`](praticas/10-kubernetes-kind-local.md) | Aula 6: cluster Kind local + manifests `infra/k8s/` (Postgres pod + API 2 réplicas + NodePort + demo perda de dados) |
 | [`praticas/11-ecr-push.md`](praticas/11-ecr-push.md) | Aula 7: build `--target prod` + push da imagem para o Amazon ECR (com `scripts/build-and-push-ecr.sh`) |
 | [`praticas/12-eks-deploy.md`](praticas/12-eks-deploy.md) | Aula 8: deploy no Amazon EKS (imagem do ECR + Service LoadBalancer) e **destruir** para não queimar crédito |
-| [`praticas/13-roteiro-aula-3-e-4.md`](praticas/13-roteiro-aula-3-e-4.md) | 🧭 **Roteiro da aula combinada Semanas 3+4** (Kind local → ECR → EKS), com os testes de cada etapa |
+| [`praticas/13-roteiro-aula-semanas-3-e-4.md`](praticas/13-roteiro-aula-semanas-3-e-4.md) | 🧭 **Roteiro da aula combinada Semanas 3+4** (Kind local → ECR → EKS), com os testes de cada etapa |
 | [`praticas/14-hpa-carga-custos.md`](praticas/14-hpa-carga-custos.md) | Aula 9: metrics-server + HPA, teste de carga (`scripts/load-test-simple.py`), observar escala e custos |
 | [`praticas/15-eventos-dynamodb.md`](praticas/15-eventos-dynamodb.md) | Aula 10: eventos/logs em DynamoDB (fallback JSON local), emissão automática no CRUD |
 | [`praticas/16-console-vs-script.md`](praticas/16-console-vs-script.md) | 🐢 Console vs Script: criar DynamoDB/EKS/Budget **na mão** pelo console (cliques + tempo) vs 1 comando — sentir por que automatizar |
@@ -104,7 +104,7 @@ docs/
     ├── 10-kubernetes-kind-local.md     ← Semana 3 (Kind local)
     ├── 11-ecr-push.md                  ← Semana 4 (ECR)
     ├── 12-eks-deploy.md                ← Semana 4 (EKS)
-    ├── 13-roteiro-aula-3-e-4.md        ← roteiro combinado 3+4
+    ├── 13-roteiro-aula-semanas-3-e-4.md        ← roteiro combinado 3+4
     ├── 14-hpa-carga-custos.md          ← Semana 5 (Aula 9: HPA + custos)
     ├── 15-eventos-dynamodb.md          ← Semana 5 (Aula 10: DynamoDB/eventos)
     ├── 16-console-vs-script.md         ← Semana 5 (console na mão vs script)
@@ -113,5 +113,5 @@ docs/
 ```
 
 > 🧭 **Semanas 3 e 4 são dadas juntas** (a Semana 3 não teve aula). Comece
-> pela [`praticas/13-roteiro-aula-3-e-4.md`](praticas/13-roteiro-aula-3-e-4.md),
+> pela [`praticas/13-roteiro-aula-semanas-3-e-4.md`](praticas/13-roteiro-aula-semanas-3-e-4.md),
 > que encadeia Kind local → ECR → EKS com os testes de cada etapa.
