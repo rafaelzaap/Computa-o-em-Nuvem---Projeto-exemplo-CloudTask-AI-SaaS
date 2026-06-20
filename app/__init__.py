@@ -36,4 +36,4 @@ Attributes:
 
 # Atualize SOMENTE ao criar uma nova branch de semana. Aulas dentro da
 # mesma semana mantêm a versão.
-__version__: str = "0.2.0"
+__version__: str = "0.3.0"

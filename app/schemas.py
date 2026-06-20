@@ -116,3 +116,14 @@ class RootResponse(BaseModel):
             ]
         }
     )
+
+
+class UploadResponse(BaseModel):
+    """Metadados devolvidos depois que um arquivo é armazenado."""
+
+    filename: str = Field(..., description="Nome seguro e único do arquivo armazenado.")
+    url: str = Field(..., description="Caminho para baixar o arquivo.")
+    size_bytes: int = Field(..., ge=0, description="Tamanho gravado em bytes.")
+    storage_mode: Literal["local", "s3"] = Field(
+        ..., description="Backend usado para armazenar o arquivo."
+    )

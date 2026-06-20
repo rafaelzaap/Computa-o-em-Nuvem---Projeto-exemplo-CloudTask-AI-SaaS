@@ -49,6 +49,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://cloudtask:cloudtask@db:5432/cloudtask}
       SECRET_KEY: ${SECRET_KEY:-change-me-please}
+      STORAGE_MODE: ${STORAGE_MODE:-local}
+      LOCAL_UPLOADS_DIR: ${LOCAL_UPLOADS_DIR:-local_uploads}
       FORCE_HTTPS: ${FORCE_HTTPS:-false}
       TRUSTED_HOSTS: ${TRUSTED_HOSTS:-localhost,127.0.0.1,0.0.0.0,*}
       PYTHONDONTWRITEBYTECODE: "1"

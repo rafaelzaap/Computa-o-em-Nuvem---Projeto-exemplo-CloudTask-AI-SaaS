@@ -34,7 +34,7 @@ from fastapi import FastAPI, Request, Response, status
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import __version__
-from app.api import routes_health, routes_tasks
+from app.api import routes_health, routes_tasks, routes_uploads
 from app.core.config import get_settings
 from app.db.database import Base, engine
 from app.schemas import RootResponse
@@ -56,8 +56,8 @@ APP_DESCRIPTION = """\
 Mini **SaaS de gerenciamento de tarefas** construído ao longo da disciplina
 **Computação em Nuvem** (N-CPU / UNINTER).
 
-Esta é a versão da **Semana 2** (versão `0.2.0`): FastAPI, Docker,
-PostgreSQL, CRUD de tarefas, configuração por ambiente e readiness check.
+Esta é a versão da **Semana 3** (versão `0.3.0`): FastAPI, Docker,
+PostgreSQL, CRUD de tarefas e uploads com fallback local.
 
 ### Status do projeto
 
@@ -67,8 +67,8 @@ PostgreSQL, CRUD de tarefas, configuração por ambiente e readiness check.
 | Semana | Branch                          | Tema                                                          |
 | -----: | :------------------------------ | :------------------------------------------------------------ |
 |      1 | `semana-01-fastapi-docker`      | FastAPI mínimo, Docker e Docker Compose, devcontainer         |
-| <kbd>2</kbd> ← *você está aqui* | `semana-02-rds-vpc-seguranca`   | PostgreSQL + CRUD, config `.env`, docs de VPC/IAM             |
-|      3 | `semana-03-s3-kubernetes`       | Upload S3 (com fallback local), Kubernetes local (Kind)       |
+|      2 | `semana-02-rds-vpc-seguranca`   | PostgreSQL + CRUD, config `.env`, docs de VPC/IAM             |
+| <kbd>3</kbd> ← *você está aqui* | `semana-03-s3-kubernetes`       | Upload S3 (com fallback local), Kubernetes local (Kind)       |
 |      4 | `semana-04-eks-aws`             | Build/push para ECR, deploy no EKS                            |
 |      5 | `semana-05-custos-nosql-logs`   | HPA + teste de carga + Cost Explorer, eventos com DynamoDB    |
 |      6 | `semana-06-cdk-final`           | AWS CDK (S3, ECR, VPC), docs finais e checklist LGPD          |
@@ -121,7 +121,7 @@ implantada.
 
 ```bash
 curl -s http://localhost:8000/
-# {"name":"CloudTask AI SaaS","version":"0.2.0","docs":"/docs"}
+# {"name":"CloudTask AI SaaS","version":"0.3.0","docs":"/docs"}
 ```
 
 **Python (httpx)**
@@ -166,6 +166,10 @@ app = FastAPI(
             "name": "tasks",
             "description": "CRUD de tarefas persistidas em PostgreSQL.",
         },
+        {
+            "name": "uploads",
+            "description": "Envio e download de arquivos em armazenamento local ou S3.",
+        },
     ],
 )
 
@@ -189,6 +193,7 @@ async def add_security_headers(request: Request, call_next) -> Response:
 # Registra os endpoints do módulo `routes_health` na aplicação.
 app.include_router(routes_health.router)
 app.include_router(routes_tasks.router)
+app.include_router(routes_uploads.router)
 
 
 @app.get(
@@ -206,7 +211,7 @@ app.include_router(routes_tasks.router)
                 "application/json": {
                     "example": {
                         "name": "CloudTask AI SaaS",
-                        "version": "0.2.0",
+                        "version": "0.3.0",
                         "docs": "/docs",
                     }
                 }

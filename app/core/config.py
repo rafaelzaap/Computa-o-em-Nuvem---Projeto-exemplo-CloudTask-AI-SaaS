@@ -25,6 +25,9 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg2://cloudtask:cloudtask@db:5432/cloudtask"
 
+    storage_mode: Literal["local", "s3"] = "local"
+    local_uploads_dir: str = "local_uploads"
+
     force_https: bool = False
     trusted_hosts: str = "localhost,127.0.0.1,*"
     hsts_max_age_seconds: int = 300
