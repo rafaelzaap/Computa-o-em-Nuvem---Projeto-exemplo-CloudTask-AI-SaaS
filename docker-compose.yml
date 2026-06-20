@@ -40,6 +40,8 @@ services:
       - .:/app:cached
       # Cache do pip do usuário appuser. Sobrevive a `down`.
       - api-pip-cache:/home/appuser/.cache/pip
+      # Credenciais temporárias do AWS Academy, somente para leitura.
+      - ${USERPROFILE}/.aws:/home/appuser/.aws:ro
     env_file:
       - path: .env
         required: false
@@ -51,6 +53,9 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-me-please}
       STORAGE_MODE: ${STORAGE_MODE:-local}
       LOCAL_UPLOADS_DIR: ${LOCAL_UPLOADS_DIR:-local_uploads}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-}
+      S3_PRESIGNED_URL_EXPIRES: ${S3_PRESIGNED_URL_EXPIRES:-3600}
       FORCE_HTTPS: ${FORCE_HTTPS:-false}
       TRUSTED_HOSTS: ${TRUSTED_HOSTS:-localhost,127.0.0.1,0.0.0.0,*}
       PYTHONDONTWRITEBYTECODE: "1"

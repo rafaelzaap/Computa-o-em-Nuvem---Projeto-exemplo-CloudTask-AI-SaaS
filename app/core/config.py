@@ -27,6 +27,9 @@ class Settings(BaseSettings):
 
     storage_mode: Literal["local", "s3"] = "local"
     local_uploads_dir: str = "local_uploads"
+    aws_region: str = "us-east-1"
+    s3_bucket_name: str = ""
+    s3_presigned_url_expires: int = Field(default=3600, ge=60, le=604800)
 
     force_https: bool = False
     trusted_hosts: str = "localhost,127.0.0.1,*"
