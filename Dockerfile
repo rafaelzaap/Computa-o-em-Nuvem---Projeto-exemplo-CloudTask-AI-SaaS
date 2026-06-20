@@ -10,7 +10,7 @@
 #   docker build --target dev  -t cloudtask-api:dev  .
 #   docker build --target prod -t cloudtask-api:prod .
 #
-# Em aulas futuras adicionamos um target `test` para o CI.
+# O target `test` executa a mesma suite usada pelo futuro CI.
 # =============================================================================
 
 
@@ -72,6 +72,21 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
       sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status == 200 else 1)"
 
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT} --proxy-headers --forwarded-allow-ips='*'"]
+
+
+# ---------- Target final: TEST ---------------------------------------------
+# Ambiente isolado e reproduzível para a suite automatizada.
+# ---------------------------------------------------------------------------
+FROM base AS test
+
+COPY --from=builder-dev --chown=appuser:appuser /root/.local /home/appuser/.local
+COPY --chown=appuser:appuser app/ /app/app/
+COPY --chown=appuser:appuser tests/ /app/tests/
+COPY --chown=appuser:appuser pyproject.toml /app/pyproject.toml
+
+USER appuser
+
+CMD ["pytest"]
 
 
 # ---------- Target final: DEV ----------------------------------------------

@@ -48,7 +48,12 @@ def list_tasks(
     limit: Annotated[int, Query(ge=1, le=100, description="Maximum rows to return.")] = 50,
 ) -> list[Task]:
     """List tasks ordered by newest first."""
-    statement = select(Task).order_by(Task.created_at.desc()).offset(skip).limit(limit)
+    statement = (
+        select(Task)
+        .order_by(Task.created_at.desc(), Task.id.desc())
+        .offset(skip)
+        .limit(limit)
+    )
     return list(db.scalars(statement).all())
 
 

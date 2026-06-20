@@ -41,8 +41,9 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 # Aula 1 ainda não tem testes; bloco preparado para a Aula 2/3.
-addopts = "-ra -q"
+addopts = "-ra -q -p no:warnings"
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.mypy]
 python_version = "3.11"

@@ -1,0 +1,28 @@
+services:
+  api:
+    build:
+      target: test
+    image: cloudtask-api:test
+    container_name: cloudtask-test-api
+    command: pytest
+    ports: !override []
+    volumes: !override []
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg2://cloudtask:cloudtask@db:5432/cloudtask_test
+      STORAGE_MODE: local
+      LOCAL_UPLOADS_DIR: /tmp/cloudtask-test-uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    container_name: cloudtask-test-db
+    ports: !override []
+    volumes: !override []
+    environment:
+      POSTGRES_USER: cloudtask
+      POSTGRES_PASSWORD: cloudtask
+      POSTGRES_DB: cloudtask_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloudtask -d cloudtask_test"]
