@@ -194,7 +194,7 @@ kubectl rollout status deploy/php-apache --timeout=180s
 
 **3. Criar o HPA (cpu 50%, 1→10):**
 ```bash
-kubectl autoscale deployment php-apache --cpu-percent=50 --min=1 --max=10
+kubectl autoscale deployment php-apache --cpu=50% --min=1 --max=10
 kubectl get hpa
 kubectl top pods        # confirma que a métrica de CPU aparece (metrics-server ok)
 ```
