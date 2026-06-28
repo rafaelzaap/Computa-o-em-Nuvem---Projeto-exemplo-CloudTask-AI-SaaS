@@ -156,6 +156,24 @@ docker compose down -v                  # para tudo + remove volumes nomeados
   - CRUD completo de tarefas (`POST/GET/PUT/DELETE /tasks`).
   - Devcontainer **não muda** — só ganha o `db` automaticamente.
 
+## Publicação da aplicação na AWS
+
+A aplicação foi preparada para publicação em nuvem usando uma arquitetura simples e compatível com o escopo da disciplina. O fluxo de publicação consiste em gerar a imagem Docker da API, enviar essa imagem para o Amazon ECR e executar a aplicação no Amazon ECS com Fargate.
+
+O banco de dados utilizado em produção é um Amazon RDS for PostgreSQL. A aplicação acessa o banco por meio de variáveis e segredos configurados na AWS, evitando deixar credenciais sensíveis diretamente no código-fonte. Para armazenamento de arquivos, o projeto utiliza um bucket privado no Amazon S3, com geração de URLs pré-assinadas quando necessário.
+
+Durante o deploy, a API é executada em uma task Fargate com IP público temporário, permitindo acessar os endpoints HTTP e a documentação Swagger em `/docs`. A validação da publicação é feita acessando a API pela URL pública, conferindo os endpoints de saúde (`/health` e `/health/ready`) e criando uma tarefa pelo Swagger para comprovar que a aplicação está funcionando e conectada ao RDS.
+
+Em resumo, a publicação envolve estes componentes principais:
+
+- Amazon ECR para armazenar a imagem Docker da API.
+- Amazon ECS com Fargate para executar a aplicação.
+- Amazon RDS for PostgreSQL para persistência dos dados.
+- Amazon S3 para armazenamento de uploads.
+- AWS Secrets Manager para guardar credenciais e configurações sensíveis.
+
+Os prints do relatório final demonstram a aplicação em execução localmente, os containers Docker, o Kubernetes local, a imagem publicada no ECR, o serviço ECS/Fargate ativo, o RDS disponível e a API pública respondendo pela documentação Swagger.
+
 ## Referências
 
 - Issue da aula: [#2 — Aula 2](https://github.com/N-CPUninter/Computa-o-em-Nuvem---Projeto-exemplo-CloudTask-AI-SaaS/issues/2)
